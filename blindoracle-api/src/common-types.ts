@@ -1,8 +1,8 @@
 /**
- * BlindOracle — Shared TypeScript Types
+ * BlindOracle — Shared TypeScript Types (v3, pooled)
  *
- * These types mirror the on-chain Compact contract. Consumed by the UI,
- * future external integrations, and tests.
+ * Mirrors the on-chain Compact contract. Consumed by UI, tests, and any
+ * external integrations.
  *
  * CRITICAL VOCABULARY (do not conflate):
  *
@@ -12,36 +12,51 @@
  *
  *   guess   — The number a player is BETTING their opponent's answer will be.
  *             PUBLIC at commit time. Stored directly on-chain.
- *             CAPACITY-CAPPED (maxGuessesPerNumber players per value).
+ *             CAPACITY-CAPPED per pool (maxGuessesPerNumber).
  */
+
+// ============================================================================
+// Pool
+// ============================================================================
+
+/** A pool identifier (0-indexed, up to poolCount-1). */
+export type PoolId = number;
+
+/** Per-pool runtime state. */
+export interface PoolState {
+  readonly poolId: PoolId;
+  readonly realPlayerCount: number;
+  readonly isReady: boolean;
+  /** Off-chain bot count shown in UI (not on-chain). */
+  readonly displayBotCount: number;
+  /** Per-(pool, guess) capacity map. */
+  readonly guessBucketCounts: ReadonlyMap<number, number>;
+}
 
 // ============================================================================
 // Round Lifecycle
 // ============================================================================
 
-/** Round phase — must match the on-chain enum values (0-5). */
 export enum RoundPhase {
-  /** Round created, entries accepted but player count below minimum. */
+  /** One or more pools below poolMinRealPlayers. */
   Forming = 0,
-  /** Minimum players reached; entry window counting down. */
+  /** All pools at or above min; still accepting entries up to per-pool max. */
   Open = 1,
   /** No more entries; matching in progress. */
   Locked = 2,
-  /** Match results being submitted one pair at a time. */
+  /** Match results being submitted per pair. */
   Settling = 3,
   /** All payouts assigned; round complete. */
   Settled = 4,
-  /** Entry window expired below minimum; refunds claimable. */
+  /** Round aborted from Forming; refunds claimable. */
   Aborted = 5,
 }
 
-/** Terminal states (round cannot progress further without new_round). */
 export const TERMINAL_PHASES: readonly RoundPhase[] = [
   RoundPhase.Settled,
   RoundPhase.Aborted,
 ];
 
-/** Phases during which new entries are accepted. */
 export const ENTRY_PHASES: readonly RoundPhase[] = [
   RoundPhase.Forming,
   RoundPhase.Open,
@@ -51,86 +66,81 @@ export const ENTRY_PHASES: readonly RoundPhase[] = [
 // Round Configuration
 // ============================================================================
 
-/** Configuration set at contract deployment (mirrors the sealed ledger fields). */
 export interface RoundConfig {
-  /** Owner's public key (hex-encoded Bytes<32>). */
+  /** Owner's public key (hex). */
   readonly owner: string;
 
-  /** Fixed stake amount per player (NIGHT base units). */
+  /** Stake per player (NIGHT base units). */
   readonly stakeAmount: bigint;
 
-  /** Minimum players needed for round to progress from Forming to Open. */
-  readonly minPlayers: number;
+  /** Number of pools (default 3). */
+  readonly poolCount: number;
 
-  /** Hard ceiling on players per round. */
-  readonly maxPlayers: number;
+  /** Per-pool minimum real players to trigger pool readiness. */
+  readonly poolMinRealPlayers: number;
 
-  /**
-   * Anti-crowd cap: no single guess value may be chosen by more than this
-   * many players. Example: range 1-10 with cap 3 allows max 30 players total.
-   */
+  /** Per-pool maximum real players. */
+  readonly poolMaxRealPlayers: number;
+
+  /** Per-pool bot seed count (UI fiction, displayed but not on-chain). */
+  readonly poolBotSeedCount: number;
+
+  /** Anti-crowd cap per (pool, guess) combo. */
   readonly maxGuessesPerNumber: number;
 
-  /** Valid answer/guess range [min, max] inclusive. */
+  /** Valid guess/answer range [min, max] inclusive. */
   readonly guessMin: number;
   readonly guessMax: number;
 
-  /** Protocol fee in basis points (200 = 2%). */
+  /**
+   * House fee in basis points. Default: 1000 = 10%.
+   * 90% of each pair's pot is distributed to winners; the fee share
+   * accumulates in `houseFeeAccumulated` for owner claim.
+   */
   readonly protocolFeeBps: number;
 
-  /** God Window reveal mode (off-chain UX policy, not enforced on-chain). */
-  readonly godWindow: GodWindowMode;
+  /** God Mode reveal policy (off-chain UX, not enforced on-chain). */
+  readonly godMode: GodModeMode;
 
   /** Entry window duration in seconds (off-chain, enforced by owner). */
   readonly entryWindowSeconds: number;
 }
 
-/** God Window disclosure mode. */
-export enum GodWindowMode {
-  /** No post-settlement reveal offered. */
+/** God Mode reveal mode. */
+export enum GodModeMode {
   Disabled = 'disabled',
-  /** Each player chooses whether to reveal their own answer. */
   OptIn = 'opt-in',
-  /** All answers revealed after settlement (configured at round creation). */
   FullReveal = 'full-reveal',
-  /** Automatic reveal after configurable delay. */
   Delayed = 'delayed',
 }
 
 // ============================================================================
-// Player Entries
+// Entries
 // ============================================================================
 
-/** A player's full on-chain entry (public data). */
 export interface PlayerEntry {
-  /** Player public key (hex-encoded Bytes<32>). */
   readonly playerPk: string;
-
-  /** Hiding commitment of (answer, salt) — answer stays hidden. */
+  /** On-chain assigned pool (hidden from the player via UI obfuscation). */
+  readonly poolId: PoolId;
+  /** Hiding commitment of (answer, salt). */
   readonly answerCommitment: string;
-
-  /** The player's PUBLIC guess of their opponent's answer. */
+  /** Public guess value. */
   readonly guess: number;
-
-  /** Local timestamp of submission (off-chain, for display). */
   readonly committedAt: number;
 }
 
 /**
- * A player's private state — never sent to the chain.
+ * Private player state — never sent to the chain.
  * Stored locally (wallet/localStorage) keyed by round ID.
  */
 export interface PlayerPrivateState {
   /** The player's answer — the number OTHERS try to guess. */
   readonly myAnswer: number;
-
-  /** The salt mixed into the answer commitment. Required for God Window reveal. */
+  /** 32-byte salt mixed into the commitment. REQUIRED for God Mode reveal. */
   readonly answerSalt: Uint8Array;
-
-  /** The player's guess — what they think their OPPONENT's answer will be. */
+  /** The player's guess of their opponent's answer. */
   readonly myGuess: number;
-
-  /** The round ID this private state belongs to. */
+  /** Round ID this state belongs to. */
   readonly roundId: number;
 }
 
@@ -138,88 +148,82 @@ export interface PlayerPrivateState {
 // Matching & Settlement
 // ============================================================================
 
-/** A pair of players matched for scoring. */
 export interface MatchPair {
   readonly playerAPk: string;
   readonly playerBPk: string;
+  /** The pool this pair belongs to (same for both players). */
+  readonly poolId: PoolId;
 }
 
-/** Outcome of a matched pair after scoring. */
 export enum MatchOutcome {
-  /** Player A guessed B's answer correctly; B did not guess A's. */
   AWins = 'a-wins',
-  /** Player B guessed A's answer correctly; A did not guess B's. */
   BWins = 'b-wins',
-  /** Both guessed correctly — pot split. */
   Split = 'split',
-  /** Neither guessed correctly — stakes refunded minus fee. */
   Draw = 'draw',
 }
 
-/** Full scoring result for a match. */
 export interface MatchResult {
   readonly pair: MatchPair;
   readonly outcome: MatchOutcome;
   readonly payoutA: bigint;
   readonly payoutB: bigint;
-  /** Did A's guess match B's answer? */
+  /** House fee from this pair (contributes to houseFeeAccumulated on-chain). */
+  readonly houseFee: bigint;
   readonly aGuessedB: boolean;
-  /** Did B's guess match A's answer? */
   readonly bGuessedA: boolean;
 }
 
-/** An unpaired player (odd player count) — receives full refund. */
 export interface UnpairedPlayer {
   readonly playerPk: string;
+  readonly poolId: PoolId;
   readonly refund: bigint;
 }
 
 // ============================================================================
-// Round Summary
+// Round Snapshot / Summary
 // ============================================================================
 
-/** Snapshot of on-chain round state for UI display. */
 export interface RoundSnapshot {
   readonly roundId: number;
   readonly phase: RoundPhase;
   readonly playerCount: number;
   readonly config: RoundConfig;
-  /** Public entries (answers hidden, guesses visible). */
   readonly entries: readonly PlayerEntry[];
-  /** Live tally of how many players have chosen each guess number. */
-  readonly guessBucketCounts: ReadonlyMap<number, number>;
+  /** Per-pool state. */
+  readonly pools: readonly PoolState[];
+  /** Convenience: how many pools are currently ready. */
+  readonly poolsReadyCount: number;
+  readonly houseFeeAccumulated: bigint;
   readonly lockedAt?: number;
   readonly settledAt?: number;
 }
 
-/** Final round summary after settlement. */
 export interface RoundSummary extends RoundSnapshot {
   readonly matches: readonly MatchResult[];
   readonly unpaired: readonly UnpairedPlayer[];
   readonly totalStake: bigint;
   readonly totalPayout: bigint;
-  readonly protocolFeeCollected: bigint;
-  readonly godWindow?: GodWindowData;
+  readonly godMode?: GodModeData;
 }
 
-/** Revealed answers for God Window display. */
-export interface GodWindowData {
+export interface GodModeData {
   readonly reveals: readonly PlayerReveal[];
 }
 
-/** A single player's revealed answer (post-settlement). */
 export interface PlayerReveal {
   readonly playerPk: string;
+  readonly poolId: PoolId;
   readonly answer: number;
   readonly verified: boolean;
 }
 
 // ============================================================================
-// Guess Capacity Helpers
+// UI Display Helpers
 // ============================================================================
 
-/** Real-time capacity info for the UI to display which numbers are still pickable. */
+/** Per-pool per-number capacity for UI rendering. */
 export interface GuessBucketCapacity {
+  readonly poolId: PoolId;
   readonly guessValue: number;
   readonly currentCount: number;
   readonly maxCount: number;
@@ -227,22 +231,36 @@ export interface GuessBucketCapacity {
   readonly isFull: boolean;
 }
 
+/** Aggregated capacity across ALL pools for a given guess value. */
+export interface AggregatedGuessCapacity {
+  readonly guessValue: number;
+  /** Sum across pools; useful for "is this number available anywhere?" display. */
+  readonly totalAvailable: number;
+  readonly totalMax: number;
+}
+
 // ============================================================================
 // Proof Receipt
 // ============================================================================
 
-/** Verifiable proof of a player's round outcome. */
 export interface ProofReceipt {
   readonly roundId: number;
   readonly playerPk: string;
-  readonly outcome: 'won' | 'lost' | 'split' | 'draw' | 'refund-aborted' | 'refund-unpaired';
+  readonly poolId: PoolId;
+  readonly outcome:
+    | 'won'
+    | 'lost'
+    | 'split'
+    | 'draw'
+    | 'refund-aborted'
+    | 'refund-unpaired';
   readonly payout: bigint;
   readonly txHash: string;
   readonly timestamp: number;
 }
 
 // ============================================================================
-// Network / Runtime Config
+// Runtime Config
 // ============================================================================
 
 export type NetworkId = 'undeployed' | 'devnet' | 'testnet' | 'mainnet';

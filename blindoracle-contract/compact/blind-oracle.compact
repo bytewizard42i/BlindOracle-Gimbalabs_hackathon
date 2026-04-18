@@ -3,35 +3,54 @@ pragma language_version >= 0.16 && <= 0.21;
 import CompactStandardLibrary;
 
 // ============================================================================
-// BlindOracle — Privacy-Preserving Prediction Game
+// BlindOracle — Privacy-Preserving Prediction Game (POOLED v3)
 // ============================================================================
 //
-// Vocabulary (CRITICAL — do not conflate these two concepts):
+// VOCABULARY (critical — do not conflate):
 //
 //   answer:  The number a player locks in for OTHER players to try to guess.
 //            PRIVATE — stored only as a hiding commitment on-chain.
-//            NEVER capacity-capped. Every player can choose any answer they
-//            want, because limiting answers would reduce the population of
-//            potential winners.
+//            NEVER capacity-capped. Every player chooses freely.
 //
 //   guess:   The number a player is betting their opponent's answer will be.
-//            PUBLIC at commit time — stored directly on-chain as a plain
-//            Uint, which is what enables the anti-crowd cap.
-//            CAPACITY-CAPPED — at most `maxGuessesPerNumber` players can
-//            guess any single number. Prevents runaway pile-ups on "lucky"
-//            numbers and keeps the payout distribution healthy.
+//            PUBLIC at commit time — enables the per-pool anti-crowd cap.
+//            CAPACITY-CAPPED per pool (maxGuessesPerNumber).
 //
-// Round lifecycle:
-//   0 = Forming    — entries accepted, but < minPlayers so the round has
-//                    not officially started.
-//   1 = Open       — minPlayers reached; entry window counting down.
-//                    Entries still accepted until the owner locks or the
-//                    window expires.
-//   2 = Locked     — no more entries; matching and settlement in progress.
-//   3 = Settling   — match results being submitted one pair at a time.
-//   4 = Settled    — all match results submitted; payouts claimable.
-//   5 = Aborted    — entry window closed with < minPlayers. Refunds
-//                    claimable by each player. Terminal until new_round().
+// POOLS:
+//
+//   Players are INVISIBLY sorted into one of `poolCount` pools (default 3).
+//   Assignment is deterministic round-robin (nextPoolToAssign counter)
+//   but the UI does not display a player's pool membership. Each pool has
+//   an independent real-player count, an independent anti-crowd cap, and
+//   an independent readiness flag.
+//
+//   Pool lifecycle gates: a pool becomes "ready" when its real-player
+//   count reaches `poolMinRealPlayers`. The round auto-advances Forming ->
+//   Open only when ALL pools are ready.
+//
+// BOTS (off-chain UX fiction):
+//
+//   The UI displays `poolBotSeedCount` pre-seeded "bots" per pool to make
+//   pools feel active during recruitment. These are PURE UI FICTION —
+//   they exist only in the client's imagination. The contract never
+//   records or reasons about bots. When real players enter, the UI
+//   simulates "bot knockouts" to maintain the illusion of activity.
+//   This keeps the contract simple, cheap, and auditable.
+//
+// SETTLEMENT:
+//
+//   Per matched pair: 90% of the pot is distributed to winners; 10% is
+//   credited to the owner as the house fee.
+//
+// ROUND LIFECYCLE:
+//
+//   0 = Forming    — one or more pools below poolMinRealPlayers
+//   1 = Open       — all pools at or above min; still accepting entries
+//                    up to poolMaxRealPlayers per pool
+//   2 = Locked     — no more entries; matching in progress
+//   3 = Settling   — match results being submitted one pair at a time
+//   4 = Settled    — all match results submitted; payouts claimable
+//   5 = Aborted    — owner aborted from Forming (below target); refunds
 // ============================================================================
 
 // --- Round Phase ---
@@ -47,74 +66,75 @@ export enum RoundPhase {
 
 // --- Ledger State ---
 
-// Round phase transitions follow a strict state machine (see above).
-// Uint<0..N> uses EXCLUSIVE upper bound in Compact, so 0..6 allows 0..=5.
+// Round phase — Uint<0..N> uses exclusive upper bound; 0..6 permits 0..=5.
 export ledger roundPhase: Uint<0..6>;
 export ledger roundId: Counter;
 export ledger playerCount: Counter;
 
-// The PRIVATE half of every entry.
-// player_pk -> hiding commitment of (answer, salt).
+// Entries
 export ledger answerCommitments: Map<Bytes<32>, Bytes<32>>;
-
-// The PUBLIC half of every entry.
-// player_pk -> the plain guess value this player submitted.
 export ledger playerGuesses: Map<Bytes<32>, Uint<64>>;
-
-// Anti-crowd tally. guess_value -> number of players who chose that guess.
-// Written by enter_round; checked before accepting a new entry.
-export ledger guessBucketCounts: Map<Uint<64>, Uint<64>>;
-
-// Settlement results: player_pk -> final payout in NIGHT base units.
-// 0 means "lost" (or not yet settled). Non-zero means claim available.
 export ledger payouts: Map<Bytes<32>, Uint<64>>;
-
-// Tracks whether a player has already claimed their payout or refund.
 export ledger claimed: Map<Bytes<32>, Boolean>;
-
-// God Window revealed values (post-settlement only).
 export ledger revealedAnswers: Map<Bytes<32>, Uint<64>>;
 
+// Per-pool anti-crowd cap. Key = persistentHash([pool_bytes, guess_bytes]).
+export ledger guessBucketCounts: Map<Bytes<32>, Uint<64>>;
+
+// --- Pool State ---
+
+// player_pk -> pool_id (0..poolCount)
+export ledger playerPool: Map<Bytes<32>, Uint<64>>;
+
+// pool_id -> real player count
+export ledger poolRealCounts: Map<Uint<64>, Uint<64>>;
+
+// pool_id -> has reached poolMinRealPlayers?
+export ledger poolReady: Map<Uint<64>, Boolean>;
+
+// Running count of pools that are ready (cheap check for all-ready)
+export ledger poolsReadyCount: Counter;
+
+// Round-robin pointer: next pool to assign
+export ledger nextPoolToAssign: Uint<64>;
+
+// Accumulated house fee (owner claims via claim_house_fee after settlement)
+export ledger houseFeeAccumulated: Uint<64>;
+
 // --- Sealed Configuration ---
-// These are set once in the constructor and never change.
 
 export sealed ledger owner: Bytes<32>;
 
-// Fixed stake per player (in NIGHT base units). Off-chain settlement
-// service uses this and `payouts` to move coins.
+// Fixed stake per player (NIGHT base units).
 export sealed ledger stakeAmount: Uint<64>;
 
-// Minimum players required for the round to progress from Forming to Open.
-// If the entry window expires with playerCount < minPlayers, the round
-// can be Aborted and all stakes refunded.
-export sealed ledger minPlayers: Uint<64>;
+// Number of pools (default 3, admin-configurable at deploy).
+export sealed ledger poolCount: Uint<64>;
 
-// Maximum players per round (hard ceiling).
-export sealed ledger maxPlayers: Uint<64>;
+// Minimum real players per pool for the round to transition Forming -> Open.
+export sealed ledger poolMinRealPlayers: Uint<64>;
 
-// Anti-crowd cap. No single guess value may be chosen by more than this
-// many players. Example: range 1-10 with cap 3 allows max 30 players total.
+// Maximum real players per pool.
+export sealed ledger poolMaxRealPlayers: Uint<64>;
+
+// Bot seed count per pool (display-only; contract does NOT track bots).
+// Exposed so the UI can render a consistent pool view across clients.
+export sealed ledger poolBotSeedCount: Uint<64>;
+
+// Anti-crowd cap — max players per (pool, guess) combination.
 export sealed ledger maxGuessesPerNumber: Uint<64>;
 
-// Valid guess range [guessMin, guessMax] inclusive. Answers use the same
-// range (validated off-chain before commitment).
+// Valid guess/answer range [guessMin, guessMax] inclusive.
 export sealed ledger guessMin: Uint<64>;
 export sealed ledger guessMax: Uint<64>;
 
-// Protocol fee in basis points. 200 = 2%.
+// House fee in basis points. Default 1000 = 10%.
 export sealed ledger protocolFeeBps: Uint<64>;
 
 // --- Witnesses ---
 
-// The player's local signing key (used to derive their public identity).
 witness local_secret_key(): Bytes<32>;
-
-// The player's own answer value (never revealed to the chain).
 witness get_my_answer(): Uint<64>;
-
-// A random salt mixed into the answer commitment. Without a salt, two
-// players who pick the same answer produce the same commitment, leaking
-// information. Must be freshly generated per round per player.
 witness get_answer_salt(): Bytes<32>;
 
 // --- Constructor ---
@@ -122,8 +142,10 @@ witness get_answer_salt(): Bytes<32>;
 constructor(
   admin_pk: Bytes<32>,
   stake: Uint<64>,
-  min_players: Uint<64>,
-  max_players: Uint<64>,
+  pool_count: Uint<64>,
+  pool_min_real: Uint<64>,
+  pool_max_real: Uint<64>,
+  pool_bot_seed: Uint<64>,
   max_guesses_per_number: Uint<64>,
   guess_min: Uint<64>,
   guess_max: Uint<64>,
@@ -131,19 +153,24 @@ constructor(
 ) {
   owner = disclose(admin_pk);
   stakeAmount = disclose(stake);
-  minPlayers = disclose(min_players);
-  maxPlayers = disclose(max_players);
+  poolCount = disclose(pool_count);
+  poolMinRealPlayers = disclose(pool_min_real);
+  poolMaxRealPlayers = disclose(pool_max_real);
+  poolBotSeedCount = disclose(pool_bot_seed);
   maxGuessesPerNumber = disclose(max_guesses_per_number);
   guessMin = disclose(guess_min);
   guessMax = disclose(guess_max);
   protocolFeeBps = disclose(fee_bps);
   roundPhase = 0;
+  nextPoolToAssign = 0;
+  houseFeeAccumulated = 0;
 }
 
-// --- Helper: derive caller public key ---
+// --- Helpers ---
 
-// Compact pattern for public key derivation (public_key() is NOT a builtin).
-// Every authorization check uses this helper.
+// Derive the caller's public key from their local secret.
+// Compact does not expose a builtin public_key(); this is the canonical
+// pattern from the Midnight Compact syntax reference.
 pure circuit derive_caller_pk(sk: Bytes<32>): Bytes<32> {
   const pk_field = persistentHash<Vector<2, Bytes<32>>>([
     pad(32, "midnight:pk:"),
@@ -152,95 +179,119 @@ pure circuit derive_caller_pk(sk: Bytes<32>): Bytes<32> {
   return (pk_field as Field) as Bytes<32>;
 }
 
+// Composite key for the per-pool guess bucket counter.
+pure circuit bucket_key(pool: Uint<64>, guess: Uint<64>): Bytes<32> {
+  const pool_bytes = (pool as Field) as Bytes<32>;
+  const guess_bytes = (guess as Field) as Bytes<32>;
+  return persistentHash<Vector<2, Bytes<32>>>([pool_bytes, guess_bytes]);
+}
+
 // --- Circuits ---
 
 // Enter a round.
 //
 //   player_pk          — caller's public key (verified against local_secret_key)
-//   answer_commitment  — persistentCommit of (answer, salt) — hides the answer
-//   guess_number       — the player's PUBLIC guess of opponent's answer
+//   answer_commitment  — persistentHash of (answer, salt)
+//   guess_number       — the player's PUBLIC guess of their future opponent's answer
 //
-// Rules enforced on-chain:
-//   1. Round must be Forming (0) or Open (1).
-//   2. Caller must not have already entered this round.
-//   3. Guess must be in [guessMin, guessMax].
-//   4. Guess bucket must not be full (< maxGuessesPerNumber players already
-//      chose this number).
-//   5. Round must not be at maxPlayers.
-//   6. If the entry brings playerCount to minPlayers, auto-advance Forming -> Open.
-//
-// NOTE: The entry window timer (for transitioning from Open to Locked) is
-// enforced off-chain by the owner calling lock_round() when the window
-// expires, OR abort_round() if playerCount is still below minPlayers.
+// The player's pool is assigned automatically via the round-robin counter.
+// The UI does NOT display pool membership (a deliberate obfuscation).
 export circuit enter_round(
   player_pk: Bytes<32>,
   answer_commitment: Bytes<32>,
   guess_number: Uint<64>
 ): [] {
-  // 1. Phase check
+  // Phase check — must be Forming (0) or Open (1)
   const phase = roundPhase;
   assert(disclose(phase == 0 || phase == 1), "Round not accepting entries");
 
-  // 2. Identity check: the caller's derived pk must match the declared player_pk
+  // Identity check
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
   assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Disclose params once and reuse
   const pk_disclosed = disclose(player_pk);
   const guess_disclosed = disclose(guess_number);
 
-  // 3. Duplicate entry check
+  // Duplicate check
   assert(disclose(!answerCommitments.member(pk_disclosed)), "Already entered");
 
-  // 4. Guess range check (split && into two assertions to avoid short-circuit branch)
+  // Guess range (split && into two asserts to avoid branching compiler error)
   assert(disclose(guess_disclosed >= guessMin), "Guess below minimum");
   assert(disclose(guess_disclosed <= guessMax), "Guess above maximum");
 
-  // 5. Guess bucket capacity check
-  // Map.lookup() returns default (0) for missing keys, so no member check needed.
-  const current_bucket_count = guessBucketCounts.lookup(guess_disclosed);
+  // Pool assignment (round-robin, deterministic, UI-obscured)
+  const assigned_pool = nextPoolToAssign;
+
+  // Pool capacity check
+  const pool_count_val = poolRealCounts.lookup(assigned_pool);
   assert(
-    disclose(current_bucket_count < maxGuessesPerNumber),
-    "Guess bucket full - pick a different number"
+    disclose(pool_count_val < poolMaxRealPlayers),
+    "Assigned pool full - please retry"
   );
 
-  // 6. Max players check
-  assert(disclose(playerCount.read() < maxPlayers), "Round is full");
+  // Per-pool anti-crowd cap
+  const bkey = bucket_key(assigned_pool, guess_disclosed);
+  const bucket_count = guessBucketCounts.lookup(bkey);
+  assert(
+    disclose(bucket_count < maxGuessesPerNumber),
+    "Guess bucket full in this pool - pick another number"
+  );
 
   // Record entry
   answerCommitments.insert(pk_disclosed, disclose(answer_commitment));
   playerGuesses.insert(pk_disclosed, guess_disclosed);
-  guessBucketCounts.insert(
-    guess_disclosed,
-    (current_bucket_count + 1) as Uint<64>
-  );
   claimed.insert(pk_disclosed, false);
   playerCount.increment(1);
 
-  // Auto-advance Forming -> Open when minPlayers reached
-  if (disclose(phase == 0 && playerCount.read() >= minPlayers)) {
-    roundPhase = 1;
+  // Record pool assignment + bucket counter
+  playerPool.insert(pk_disclosed, assigned_pool);
+  const new_pool_count = (pool_count_val + 1) as Uint<64>;
+  poolRealCounts.insert(assigned_pool, new_pool_count);
+  guessBucketCounts.insert(bkey, (bucket_count + 1) as Uint<64>);
+
+  // Mark pool ready if this entry just pushed it to min
+  const is_ready_already = poolReady.lookup(assigned_pool);
+  if (disclose(is_ready_already == false)) {
+    if (disclose(new_pool_count >= poolMinRealPlayers)) {
+      poolReady.insert(assigned_pool, true);
+      poolsReadyCount.increment(1);
+    }
+  }
+
+  // Advance round-robin pointer (wrap to 0 at poolCount)
+  const next_candidate = (assigned_pool + 1) as Uint<64>;
+  if (disclose(next_candidate >= poolCount)) {
+    nextPoolToAssign = 0;
+  } else {
+    nextPoolToAssign = next_candidate;
+  }
+
+  // Auto-transition Forming -> Open when all pools ready
+  if (disclose(phase == 0)) {
+    if (disclose(poolsReadyCount.read() >= poolCount)) {
+      roundPhase = 1;
+    }
   }
 }
 
-// Owner locks the round. Valid only from Open (1). Transitions to Locked (2).
-// Off-chain, the owner calls this when the entry window expires with enough
-// players. If the window expires with too few players, the owner calls
-// abort_round() instead.
+// Owner locks the round. Valid from Open (1). Transitions to Locked (2).
+// Must have all pools at or above poolMinRealPlayers.
 export circuit lock_round(): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
   assert(disclose(caller_pk == owner), "Not owner");
   assert(disclose(roundPhase == 1), "Round must be Open to lock");
-  assert(disclose(playerCount.read() >= minPlayers), "Below minimum players");
+  assert(
+    disclose(poolsReadyCount.read() >= poolCount),
+    "Not all pools ready"
+  );
 
   roundPhase = 2;
 }
 
-// Owner aborts the round. Valid only from Forming (0) when the entry
-// window expires below minPlayers. Transitions to Aborted (5), enabling
-// every player to claim a full refund.
+// Owner aborts from Forming (0) when entry window expires below target.
+// Every participant can then claim_refund.
 export circuit abort_round(): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
@@ -250,45 +301,36 @@ export circuit abort_round(): [] {
   roundPhase = 5;
 }
 
-// Player claims a refund after the round is Aborted. Idempotent: can only
-// be claimed once per player. The actual coin movement happens off-chain
-// via the settlement service reading `payouts` and `claimed`.
+// Player claims a full-stake refund after round is Aborted. Idempotent.
+// No house fee on aborted rounds.
 export circuit claim_refund(player_pk: Bytes<32>): [] {
   const pk_disclosed = disclose(player_pk);
 
-  // Must be in Aborted state
   assert(disclose(roundPhase == 5), "Round not aborted");
-
-  // Must be a participant
   assert(disclose(answerCommitments.member(pk_disclosed)), "Not a participant");
-
-  // Must not already have claimed
   assert(disclose(!claimed.lookup(pk_disclosed)), "Refund already claimed");
 
-  // Caller must be the player themselves
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
   assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Record the refund amount (full stake, no fee on aborted rounds)
   payouts.insert(pk_disclosed, stakeAmount);
   claimed.insert(pk_disclosed, true);
 }
 
-// Owner submits the result of one matched pair. Valid only from Locked (2)
-// or Settling (3). On first call, transitions Locked -> Settling.
+// Owner submits the result of one matched pair. Pairs must be within the
+// same pool (enforced off-chain; contract verifies both are participants).
+// On first call transitions Locked -> Settling.
 //
-// The off-chain matching service pairs players via deterministic randomness
-// (derived from all commitments), computes payouts per scoreMatch() rules,
-// and calls this circuit once per pair.
-//
-// For unpaired players (odd count), the owner calls submit_unpaired_refund
-// instead.
+// Fee accounting: the 10% house fee is computed off-chain in scoreMatch()
+// and the house's share is accumulated in houseFeeAccumulated for later
+// owner claim via claim_house_fee().
 export circuit submit_match_result(
   player_a_pk: Bytes<32>,
   player_b_pk: Bytes<32>,
   payout_a: Uint<64>,
-  payout_b: Uint<64>
+  payout_b: Uint<64>,
+  house_fee: Uint<64>
 ): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
@@ -300,24 +342,32 @@ export circuit submit_match_result(
   const a_disclosed = disclose(player_a_pk);
   const b_disclosed = disclose(player_b_pk);
 
-  // Both players must be participants
   assert(disclose(answerCommitments.member(a_disclosed)), "Player A not in round");
   assert(disclose(answerCommitments.member(b_disclosed)), "Player B not in round");
 
-  // Payouts not already assigned (prevent double-settlement)
+  // Enforce same-pool matching
+  const a_pool = playerPool.lookup(a_disclosed);
+  const b_pool = playerPool.lookup(b_disclosed);
+  assert(disclose(a_pool == b_pool), "Players are not in the same pool");
+
+  // Prevent double-settlement
   assert(disclose(!payouts.member(a_disclosed)), "Player A already settled");
   assert(disclose(!payouts.member(b_disclosed)), "Player B already settled");
 
   payouts.insert(a_disclosed, disclose(payout_a));
   payouts.insert(b_disclosed, disclose(payout_b));
 
-  // First call transitions Locked -> Settling
+  // Accumulate house fee for this pair
+  const current_fee = houseFeeAccumulated;
+  houseFeeAccumulated = (current_fee + disclose(house_fee)) as Uint<64>;
+
   if (disclose(phase == 2)) {
     roundPhase = 3;
   }
 }
 
-// Owner refunds a player who couldn't be paired (odd player count).
+// Owner refunds a player who could not be paired (odd pool size).
+// Full stake returned; no house fee.
 export circuit submit_unpaired_refund(player_pk: Bytes<32>): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
@@ -330,7 +380,6 @@ export circuit submit_unpaired_refund(player_pk: Bytes<32>): [] {
   assert(disclose(answerCommitments.member(pk_disclosed)), "Player not in round");
   assert(disclose(!payouts.member(pk_disclosed)), "Player already settled");
 
-  // Full stake refund for unpaired
   payouts.insert(pk_disclosed, stakeAmount);
 
   if (disclose(phase == 2)) {
@@ -338,8 +387,8 @@ export circuit submit_unpaired_refund(player_pk: Bytes<32>): [] {
   }
 }
 
-// Owner finalizes the round. Valid from Settling (3). Transitions to
-// Settled (4). All payouts must be assigned before this is called.
+// Owner finalizes the round. Must be called after all match results
+// submitted. Transitions Settling -> Settled.
 export circuit settle_round(): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
@@ -349,14 +398,24 @@ export circuit settle_round(): [] {
   roundPhase = 4;
 }
 
-// Player reveals their answer for the God Window display.
-// Valid from Settled (4). Verifies the revealed value matches the original
-// commitment.
-//
-// The salt is NOT stored on-chain; the player must provide it here to
-// reconstruct the commitment. Off-chain UX stores the salt in the player's
-// wallet/localStorage keyed by round ID.
-export circuit reveal_for_god_window(
+// Owner claims the accumulated house fee after settlement. The actual
+// coin movement happens off-chain via the settlement service reading
+// houseFeeAccumulated. Resets the counter to prevent double-claim.
+export circuit claim_house_fee(): [] {
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+  assert(disclose(roundPhase == 4), "Round must be Settled");
+  assert(disclose(houseFeeAccumulated > 0), "No fee to claim");
+
+  // Record the claim by zeroing the counter. The off-chain service uses
+  // the emitted event (or prior ledger read) to move coins to the owner.
+  houseFeeAccumulated = 0;
+}
+
+// Player reveals their answer for the God Mode display (post-settlement).
+// Verifies the (answer, salt) preimage matches the stored commitment.
+export circuit reveal_for_god_mode(
   player_pk: Bytes<32>,
   answer: Uint<64>,
   salt: Bytes<32>
@@ -366,12 +425,11 @@ export circuit reveal_for_god_window(
   const pk_disclosed = disclose(player_pk);
   assert(disclose(answerCommitments.member(pk_disclosed)), "No commitment found");
 
-  // Caller must be the player themselves
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
   assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Recompute the commitment and verify it matches what's stored
+  // Recompute commitment and verify
   const answer_bytes = (answer as Field) as Bytes<32>;
   const computed_commitment = persistentHash<Vector<2, Bytes<32>>>([
     answer_bytes,
@@ -387,7 +445,7 @@ export circuit reveal_for_god_window(
 }
 
 // Owner resets the contract for a new round. Valid from Settled (4) or
-// Aborted (5). Clears all round data and advances the round counter.
+// Aborted (5).
 export circuit new_round(): [] {
   const sk = local_secret_key();
   const caller_pk = derive_caller_pk(sk);
@@ -403,7 +461,14 @@ export circuit new_round(): [] {
   payouts.resetToDefault();
   claimed.resetToDefault();
   revealedAnswers.resetToDefault();
+  playerPool.resetToDefault();
+  poolRealCounts.resetToDefault();
+  poolReady.resetToDefault();
+  poolsReadyCount.resetToDefault();
   playerCount.resetToDefault();
+
+  houseFeeAccumulated = 0;
+  nextPoolToAssign = 0;
 
   roundId.increment(1);
   roundPhase = 0;

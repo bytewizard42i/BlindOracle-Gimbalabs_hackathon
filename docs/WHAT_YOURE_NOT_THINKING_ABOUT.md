@@ -707,11 +707,172 @@ Both appeal to different moods — fast casual (BlindOracle) vs deep strategy (P
 
 ---
 
+## v3 Pool-Specific Problems (New)
+
+### Problem 22: Pool Observability via nextPoolToAssign
+
+#### The problem 🟡 P1
+The `nextPoolToAssign` counter is public on-chain. A sophisticated player can query the ledger, see "next assignment = pool 1", and time their tx to land in pool 1 (or wait if they want pool 2). This defeats the "invisible pool" design goal.
+
+#### The solution ✓
+**Hash-based assignment** using a sealed round-secret + player pk.
+
+Add a witness-provided round entropy committed at `new_round()`:
+```compact
+witness get_round_assignment_secret(): Bytes<32>;
+
+// In enter_round, replace round-robin with:
+const assignment_hash = persistentHash<Vector<2, Bytes<32>>>([
+  pk_disclosed,
+  roundAssignmentSecret  // committed at round start, public after
+]);
+// Convert to pool_id: take bytes mod poolCount
+```
+
+Players can't predict their pool without knowing `roundAssignmentSecret`, which is committed but not revealed until lock (revealed only so observers can verify assignments post-hoc).
+
+#### Status
+**Planned for v4.** MVP ships with observable round-robin; hash-based is a quick upgrade.
+
+---
+
+### Problem 23: Pool Imbalance / Unfair Fills
+
+#### The problem 🟡 P1
+With round-robin assignment, pool 0 fills with early players, pool 1 with mid-round, pool 2 with latecomers. If players who enter later have more information (e.g., they can see which guess buckets are full), pool 2 has a "skilled late-comer" advantage.
+
+#### The solution ✓
+**Bounded entry windows + shuffle at lock**.
+
+**Option A — Shuffle at lock**:
+- During entry, players go into a "waiting pool" (pool -1)
+- At `lock_round`, all waiting players are deterministically re-assigned to pools 0-2 via entropy-seeded shuffle
+- Round-robin is abandoned; pools are filled ATOMICALLY at lock
+
+**Option B — Entry time matters equally**:
+- Accept that late entrants have more info; compensate with a small early-entry bonus (XP, cosmetic)
+- Design the game so information asymmetry is limited (random pool means you can't exploit info anyway)
+
+**Recommended**: Option A for competitive rounds, Option B for casual rounds.
+
+#### Status
+**Option A is planned for tournament mode.** Standard rounds ship with round-robin.
+
+---
+
+### Problem 24: Bot Psychology Disclosure
+
+#### The problem 🟢 P2
+If players discover that bots are "just UI fiction" (e.g., by reading our code — it's open source), the psychological effect evaporates. Early-entry players know the pool "looks" fuller than it actually is.
+
+#### The solution ✓
+**Transparency + narrative framing**.
+
+Don't hide the bots. Document them prominently:
+- In-UI tooltip: "This pool has 6 AI participants to show example plays"
+- "AI participants do not affect real matches"
+- Frame bots as "a preview of what others are picking"
+
+This removes the psychological trick but preserves the UX benefit (pools don't look empty). Real players still appreciate seeing example entries.
+
+**Alternative**: make bots functional — actually match against bots when player count is low, with clear labeling. This fills the "can't find opponents" gap on quiet nights.
+
+#### Status
+**Transparent UX decision for v1.** Document bots plainly. Consider functional bots as a future feature.
+
+---
+
+### Problem 25: Pool Assignment Validator
+
+#### The problem 🟡 P1
+The UI trusts the contract's pool assignment. If the indexer is compromised or the UI has a bug, players might be shown wrong pool assignments, leading to confusion at matching time.
+
+#### The solution ✓
+**Client-side pool verification**.
+
+After entry, the UI should:
+1. Query `playerPool[my_pk]` from the contract
+2. Verify it matches what the UI expected
+3. Display a "verified" badge on the pool assignment
+
+If mismatch, alert user and log the discrepancy for debug.
+
+#### Status
+**Straightforward UI work. Planned for v1.**
+
+---
+
+### Problem 26: House Fee Accumulation Race
+
+#### The problem 🟡 P1
+`houseFeeAccumulated` accumulates across all pairs. If `submit_match_result` is called in parallel (multiple owner tx in flight), naive implementations could lose fee increments.
+
+#### The solution ✓ (already addressed)
+Compact's ledger state is atomic per-transaction. Each `submit_match_result` call reads `houseFeeAccumulated`, adds the pair's fee, and writes back. Midnight's ledger semantics serialize these updates. No race.
+
+**BUT** the owner must submit match results sequentially (or accept that their txs may settle in any order). The SDK should batch them or submit with nonces.
+
+#### Status
+**Non-issue on-chain.** UI guidance: submit match results in sequence or use a batching helper.
+
+---
+
+### Problem 27: Same-Pool Matching Enforcement
+
+#### The problem ✓ (already addressed)
+`submit_match_result` asserts `playerPool[A] == playerPool[B]`. If the off-chain matcher accidentally pairs cross-pool players, the transaction reverts. Good.
+
+#### Edge case: what if both players are in pool 0 but the matcher claims they're in pool 1? The assert still passes (A and B are same pool), but the pool attribution is wrong. This could affect UI display of "pool 0 outcomes" vs "pool 1 outcomes" but doesn't affect fairness.
+
+Minor UI validation: cross-reference payouts against `playerPool` mapping when rendering post-settlement summaries.
+
+#### Status
+**Resolved by contract. UI validation is nice-to-have.**
+
+---
+
+## Updated Priority Summary (v3)
+
+| Priority | Problem | Solution | When |
+|----------|---------|----------|------|
+| 🔴 P0 | Match oracle | Per-player ZK proofs | v2 (still open) |
+| 🔴 P0 | Sybil attacks | DIDz/KYCz + stake gating | v1-v2 |
+| 🔴 P0 | Collusion | Anti-cluster pairing + split penalty | v1 |
+| 🔴 P0 | Proof server failover | Multi-provider config | v1 |
+| 🔴 P0 | Gambling law | Path A → B → C staging | Pre-real-money |
+| 🔴 P0 | Randomness grinding | Block-hash beacon or VRF | Pre-mainnet |
+| ✅ Done | Commitment malleability | Salt | v1 contract |
+| ✅ Done | Per-pool anti-crowd cap | Composite key | v3 contract |
+| ✅ Done | Min-player gating | poolMinRealPlayers + auto-transition | v3 contract |
+| ✅ Done | 90/10 split | protocolFeeBps=1000 default | v3 contract |
+| ✅ Done | Same-pool matching | On-chain assertion | v3 contract |
+| ✅ Done | Abort + refund | abort_round + claim_refund | v2/v3 contract |
+| 🟡 P1 | Pool observability | Hash-based assignment | v4 |
+| 🟡 P1 | Pool imbalance | Shuffle at lock | v4 |
+| 🟡 P1 | ZK hardware cost | Benchmarking + opt-in server proving | v1-v2 |
+| 🟡 P1 | Onboarding | Tier 0 "try-it" mode | v1 |
+| 🟡 P1 | Economics | Batch circuits + subsidies | v1 |
+| 🟡 P1 | Retention | Near-miss UX + XP + streaks | v1 |
+| 🟡 P1 | Mobile | Read-only → PWA → native | v1 → v3 |
+| 🟡 P1 | Support/disputes | Receipts + policy + treasury | v1 |
+| 🟡 P1 | Lost wallets | DIDz social recovery | v2 |
+| 🟡 P1 | Upgradability | Pause circuit + migration | Pre-mainnet |
+| 🟡 P1 | Audit | Staged review → pro audit | Pre-mainnet |
+| 🟡 P1 | Tax reporting | KYC at winnings threshold | v2 |
+| 🟡 P1 | Pool verification | UI double-check | v1 |
+| 🟢 P2 | Ad restrictions | Careful copy + geo-targeting | v1 |
+| 🟢 P2 | Trademark | USPTO search (1 hr) | **Before demo** |
+| 🟢 P2 | Cold start | Seeded community + schedules | v1 launch |
+| 🟢 P2 | POB cannibalization | Clear positioning + cross-promo | v1 |
+| 🟢 P2 | Bot transparency | Document plainly in UI | v1 |
+
+---
+
 ## The Most Important Thing
 
-The protocol is sound. The mechanics are correct. The privacy story is clean.
+The protocol is sound. The mechanics are correct. The privacy story is clean. The pool architecture adds depth and scalability.
 
-The hardest unsolved problem is **match settlement oracle** (Problem 3) — everything else has a known path. If there's a single technical risk that could kill this project post-hackathon, it's that one. **Pick a design (my vote: Option A per-player ZK proofs) before v1 implementation starts.**
+The hardest unsolved problem remains **match settlement oracle** (Problem 3) — even with pools, someone still needs to compute and submit match results with knowledge of both answers. If there's a single technical risk that could kill this project post-hackathon, it's that one. **Pick a design (my vote: Option A per-player ZK proofs) before v1 implementation starts.**
 
 The hardest non-technical problem is **gambling law** (Problem 16). Plan accordingly.
 

@@ -1,12 +1,9 @@
 /**
- * BlindOracle — Runtime & Round Configuration Defaults
- *
- * The UI loads a live config from `public/config.json` at startup which
- * can override these defaults per-environment.
+ * BlindOracle — Runtime & Round Configuration (v3, pooled)
  */
 
 import type { RoundConfig, RuntimeConfig } from './common-types.js';
-import { GodWindowMode } from './common-types.js';
+import { GodModeMode } from './common-types.js';
 
 // ============================================================================
 // Network Configs
@@ -45,79 +42,84 @@ export const MAINNET_CONFIG: RuntimeConfig = {
 // ============================================================================
 
 /**
- * MVP hackathon demo config.
+ * Demo config — hackathon showcase, free-play.
  *
- * Design rationale:
- *   - Range 1-10 + maxGuessesPerNumber=3 → max 30 players (10*3).
- *     Keeps each round compact and shippable.
- *   - minPlayers=2 so the contract actually progresses with low turnout.
- *   - 2-minute entry window (off-chain, enforced by owner).
- *   - Zero protocol fee → free-play showcase, no gambling concerns.
- *   - Full God Window reveal for maximum demo drama.
+ * Pool math:
+ *   3 pools × 4 min real players = 12 real players minimum for round to start
+ *   3 pools × 8 max real players = 24 real players total capacity
+ *   Each pool seeds 6 bots (pure UI fiction)
+ *   Cap: 2 guesses per number per pool (range 1-10) = 3 × 10 × 2 = 60 theoretical max
+ *
+ * Fee: 0% for demo (no gambling concerns). Production uses 10% (STANDARD_ROUND_CONFIG).
  */
 export const DEMO_ROUND_CONFIG: RoundConfig = {
-  owner: '0x' + '0'.repeat(64), // placeholder, set at deployment
-  stakeAmount: 0n, // free-play for hackathon
-  minPlayers: 2,
-  maxPlayers: 30,
-  maxGuessesPerNumber: 3,
+  owner: '0x' + '0'.repeat(64),
+  stakeAmount: 0n,
+  poolCount: 3,
+  poolMinRealPlayers: 4,
+  poolMaxRealPlayers: 8,
+  poolBotSeedCount: 6,
+  maxGuessesPerNumber: 2,
   guessMin: 1,
   guessMax: 10,
   protocolFeeBps: 0,
-  godWindow: GodWindowMode.FullReveal,
+  godMode: GodModeMode.FullReveal,
   entryWindowSeconds: 120,
 };
 
 /**
- * Standard production round config.
+ * Standard production config — 10% house fee, real stakes.
  *
- * Design rationale:
- *   - Range 1-10 + maxGuessesPerNumber=5 → max 50 players.
- *   - minPlayers=4 so there are real stakes (at least 2 pairings).
- *   - 5-minute entry window.
- *   - 2% protocol fee.
- *   - Opt-in God Window.
+ * Pool math:
+ *   3 pools × 4 min = 12 minimum
+ *   3 pools × 10 max = 30 total capacity
+ *   Each pool seeds 10 bots
+ *   Cap: 3 guesses per number per pool (range 1-10) = 3 × 10 × 3 = 90 theoretical
  */
 export const STANDARD_ROUND_CONFIG: RoundConfig = {
   owner: '0x' + '0'.repeat(64),
-  stakeAmount: 1_000_000n, // 1 NIGHT (assuming 6 decimals)
-  minPlayers: 4,
-  maxPlayers: 50,
-  maxGuessesPerNumber: 5,
+  stakeAmount: 1_000_000n,
+  poolCount: 3,
+  poolMinRealPlayers: 4,
+  poolMaxRealPlayers: 10,
+  poolBotSeedCount: 10,
+  maxGuessesPerNumber: 3,
   guessMin: 1,
   guessMax: 10,
-  protocolFeeBps: 200,
-  godWindow: GodWindowMode.OptIn,
+  protocolFeeBps: 1000, // 10%
+  godMode: GodModeMode.OptIn,
   entryWindowSeconds: 300,
 };
 
 /**
- * High-stakes tournament config.
+ * High-stakes tournament — tighter caps, wider range.
  *
- * Design rationale:
- *   - Wider range (1-20) + tighter cap (2 per number) = 40 players max.
- *   - Forces more strategic thinking (more numbers to consider).
- *   - Higher min (6) so every round has meaningful action.
- *   - Disabled God Window — secrets stay secret forever.
+ * Pool math:
+ *   3 pools × 6 min = 18 minimum
+ *   3 pools × 12 max = 36 total capacity
+ *   Bots: 0 (tournaments don't need the illusion)
+ *   Cap: 2 per (pool, guess) (range 1-20) = 3 × 20 × 2 = 120 theoretical
  */
 export const TOURNAMENT_ROUND_CONFIG: RoundConfig = {
   owner: '0x' + '0'.repeat(64),
-  stakeAmount: 10_000_000n, // 10 NIGHT
-  minPlayers: 6,
-  maxPlayers: 40,
+  stakeAmount: 10_000_000n,
+  poolCount: 3,
+  poolMinRealPlayers: 6,
+  poolMaxRealPlayers: 12,
+  poolBotSeedCount: 0,
   maxGuessesPerNumber: 2,
   guessMin: 1,
   guessMax: 20,
-  protocolFeeBps: 300,
-  godWindow: GodWindowMode.Disabled,
+  protocolFeeBps: 1000,
+  godMode: GodModeMode.Disabled,
   entryWindowSeconds: 600,
 };
 
-/**
- * Compute the theoretical maximum players a round can hold, given the
- * anti-crowd cap. Useful for UI sanity-checks.
- */
+/** Theoretical maximum real players across all pools. */
 export function theoreticalMaxPlayers(config: RoundConfig): number {
-  const range = config.guessMax - config.guessMin + 1;
-  return Math.min(config.maxPlayers, range * config.maxGuessesPerNumber);
+  const perPoolCap = Math.min(
+    config.poolMaxRealPlayers,
+    (config.guessMax - config.guessMin + 1) * config.maxGuessesPerNumber,
+  );
+  return config.poolCount * perPoolCap;
 }

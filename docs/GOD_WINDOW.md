@@ -1,174 +1,233 @@
-# BlindOracle — God Window Design
+# BlindOracle — God Mode
 
-## Definition
+> *"The oracle knows. You did not. Now you may see."*
 
-The **God Window** is a post-settlement reveal interface that optionally shows the true hidden values after the protocol has finalized matching and rewards.
-
-It is the moment where secrecy ends and truth becomes visible — but only after fairness has already been guaranteed.
+**Status**: Implemented in contract as `reveal_for_god_mode`. UI implementation pending.
 
 ---
 
-## Why It Matters
+## 1. What Is God Mode?
 
-The God Window creates a **dramatic reveal moment** while preserving fairness during gameplay:
+God Mode is the optional **post-settlement phase** where players can reveal their original answers. It's the emotional climax of a round — the moment when hidden information becomes visible, but **only after** fairness has been cryptographically guaranteed.
 
-- During active play: full privacy, maximum suspense
-- After settlement: controlled disclosure, maximum drama
-- The two phases never overlap — privacy is never compromised during gameplay
+### The narrative arc
 
-This is the emotional climax of each round. The God Window transforms BlindOracle from "a game where you guess" into "a game where hidden truth is finally revealed."
+1. **Forming** — you whisper a number into the dark
+2. **Open** — others whisper their numbers; you all guess each other
+3. **Locked** — the door closes; fate is sealed
+4. **Settled** — the oracle judges; payouts flow
+5. **God Mode** — *the veil lifts*
 
----
-
-## Modes
-
-### Mode 1 — Disabled (Default)
-
-- No post-settlement reveal
-- Players receive only their personal outcome (win/lose/draw)
-- Maximum privacy purity
-- Best for: serious competitive play, wagering modes
-
-### Mode 2 — Opt-In Per Player
-
-- After settlement, each player can choose to reveal their own secret and guess
-- Other players' data remains hidden unless they also opt in
-- Creates interesting social dynamics (who reveals? who stays hidden?)
-- Best for: social play, building trust
-
-### Mode 3 — Full Reveal (Round Setting)
-
-- After settlement, ALL secrets and guesses for ALL pairs are revealed
-- Set by the round creator before the round opens
-- Players know entering the round that full reveal will happen
-- Best for: spectator mode, educational demos, hackathon presentations
-
-### Mode 4 — Delayed Reveal
-
-- Secrets are revealed automatically after a configurable delay (e.g., 24 hours post-settlement)
-- Creates a "sealed envelope" effect
-- Best for: tournaments, narrative-driven events
+This is not a privacy compromise. It's the **end** of privacy for players who choose it.
 
 ---
 
-## UX Design
+## 2. Why Is It Important?
 
-### Pre-Settlement
+### Narrative payoff
+Without a reveal, the game feels abstract. Players enter numbers, see payouts, move on. With God Mode, there's a dramatic "aha" — you see what your opponent was hiding, what you almost got, what they were thinking.
 
-The God Window is **invisible**. No UI element hints at what the secrets might be. The interface emphasizes mystery:
+### Trust-building
+Every reveal is cryptographically verified via the commitment preimage. Players can confirm the contract didn't cheat: the revealed number MATCHES the commitment they saw earlier. This is **social proof via math**.
 
-- "Your secret is sealed"
-- "Your guess is locked"
-- "Awaiting oracle judgment..."
+### Skill signal
+A player's revealed answer tells the community something about their strategy. Over many rounds, patterns emerge — "Bob always picks 7", "Alice never picks edge numbers." This builds social capital and meta-game depth.
 
-### Settlement Moment
-
-The result screen shows:
-
-- **Your outcome**: Win / Lose / Draw
-- **Your guess** vs **what was needed** (if mode allows)
-- **Proof receipt** link
-- **God Window button** (if enabled for this round)
-
-### God Window View
-
-When opened:
-
-```
-┌──────────────────────────────────────────┐
-│          GOD WINDOW — Round #42          │
-│                                          │
-│  Match 1:  Alice vs Bob                  │
-│  Alice's secret: 7    Bob's guess: 7 ✓   │
-│  Bob's secret: 3      Alice's guess: 5 ✗  │
-│  → Alice wins                            │
-│                                          │
-│  Match 2:  Carol vs Dave                 │
-│  Carol's secret: 9    Dave's guess: 2 ✗   │
-│  Dave's secret: 4     Carol's guess: 4 ✓  │
-│  → Carol wins                            │
-│                                          │
-│  Match 3:  Eve vs Frank                  │
-│  Eve's secret: 1      Frank's guess: 1 ✓  │
-│  Frank's secret: 6    Eve's guess: 6 ✓    │
-│  → Split                                 │
-└──────────────────────────────────────────┘
-```
-
-### Visual Design
-
-- Dark background with slow-reveal animations
-- Numbers appear one at a time with dramatic timing
-- Checkmarks and crosses animate in
-- Winner highlight glow effect
-- Optional sound design: low bass hit on reveal, triumphant tone on win
+### Highlight reel
+Good reveals make great streaming content. Near-misses, bold plays, shocking coincidences — all fodder for OBS overlays, Discord clips, Twitter GIFs.
 
 ---
 
-## Technical Implementation
+## 3. Four Modes
 
-### On-Chain
+Configured per-round via `RoundConfig.godMode`:
 
-The God Window uses a separate circuit:
+### `Disabled` — pure privacy forever
+No reveals ever. Answers stay secret. Best for:
+- Tournament play where strategic info has long-term value
+- High-stakes rounds where revealing is risky
+- Players who prefer the mystery
+
+### `OptIn` — each player chooses (default for Standard)
+Each player calls `reveal_for_god_mode` if they want; others stay hidden. Best for:
+- Casual play where some players want drama, some don't
+- Mixed social groups
+- Preserving individual agency
+
+### `FullReveal` — all revealed (default for Demo)
+Socially expected that everyone reveals. Not strictly enforced on-chain (players can refuse). Best for:
+- Demos and showcases
+- Community events
+- Hackathon presentations
+
+### `Delayed` — automatic reveal after time
+Reveals happen automatically after a configurable delay. Creates a sealed-envelope effect. Best for:
+- High-suspense moments
+- Tournament final rounds
+- Content-creation formats
+
+---
+
+## 4. How The Reveal Works
+
+### Client-side
+
+1. At entry time, the UI generates a random 32-byte salt
+2. UI stores salt in localStorage: `localStorage['blindoracle_salt_' + roundId + '_' + playerPk] = saltHex`
+3. Post-settlement, UI retrieves salt when player clicks "Reveal"
+
+### On-chain
 
 ```compact
-export circuit reveal_for_god_window(
-  round_id: Field,
+export circuit reveal_for_god_mode(
   player_pk: Bytes<32>,
-  secret: Field,
-  guess: Field,
+  answer: Uint<64>,
   salt: Bytes<32>
 ): [] {
-  // Verify round is settled
-  assert(disclose(round_state == 3), "Round not settled");
+  // Must be settled phase
+  assert(disclose(roundPhase == 4), "Round not settled");
 
-  // Verify the revealed secret matches the original commitment
-  const expected_commit = persistentCommit(secret);
-  assert(disclose(expected_commit == stored_commitment), "Secret mismatch");
+  // Must be a participant
+  assert(disclose(answerCommitments.member(pk)), "No commitment found");
 
-  // Verify the revealed guess matches the original guess commitment
-  const expected_guess_commit = persistentCommit(guess);
-  assert(disclose(expected_guess_commit == stored_guess), "Guess mismatch");
+  // Caller must be the player themselves
+  assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Store revealed values on ledger (now public)
-  revealed_secrets.insert(player_pk, (secret as Field) as Bytes<32>);
-  revealed_guesses.insert(player_pk, (guess as Field) as Bytes<32>);
+  // Recompute commitment and verify
+  const answer_bytes = (answer as Field) as Bytes<32>;
+  const computed = persistentHash([answer_bytes, salt]);
+  const stored = answerCommitments.lookup(pk);
+  assert(disclose(computed == stored), "Commitment mismatch");
+
+  // Write revealed answer to public ledger
+  revealedAnswers.insert(pk, disclose(answer));
 }
 ```
 
-### Off-Chain
+### Why this is trustless
 
-The UI fetches revealed data from the indexer and animates the display. If a player hasn't revealed, their slot shows "Unrevealed" with a lock icon.
-
----
-
-## Privacy Considerations
-
-- The God Window is **strictly post-settlement** — it cannot be triggered during active play
-- In Opt-In mode, revealing is voluntary — no player is forced to disclose
-- In Full Reveal mode, players are warned before entering the round
-- The reveal proves the disclosed values match the original commitments — no fake reveals possible
-- Even in Full Reveal mode, only the secrets and guesses are shown — wallet balances, transaction details, and other private data remain hidden
+The contract doesn't trust the player's word. It RECOMPUTES the commitment from the claimed `(answer, salt)` and verifies it matches the one stored at commit time. If a player tries to reveal a fake answer, the assertion fails and the tx reverts.
 
 ---
 
-## Spectator Integration
+## 5. UX Design
 
-The God Window is the foundation for a future **Spectator Mode**:
+### During settlement
+- "Round settled! Revealing in 30 seconds..." (for Delayed mode)
+- "Want to reveal your answer?" (for OptIn mode)
+- "All players will reveal in 10 seconds..." (for FullReveal mode)
 
-- Spectators join a round as observers (no stake, no commitment)
-- During active play, spectators see only: player count, countdown timer, match assignments after lock
-- After settlement, spectators see the God Window automatically
-- Spectators can react, comment, or share replays
+### The reveal animation
+- Black screen
+- Numbers appear slowly, one at a time, with a low bass pulse
+- Each player's revealed answer fades in next to their pk (truncated)
+- If they were paired with someone who also revealed, the pair is highlighted
+- "Alice's answer: 7. Bob's guess: 3. Near miss — off by 4."
 
-This creates a **streaming-friendly** experience — the reveal moment is inherently entertaining content.
+### After the reveal
+- **Streaming overlay ready** layout: big numbers, clean background
+- Shareable image export: "My BlindOracle Round #42: I guessed 3, they had 7. So close."
+- Archive in your player history (local + optional on-chain via DIDz credential)
 
 ---
 
-## Design Principles
+## 6. Technical Implementation
 
-1. **Privacy during play is sacred** — the God Window never leaks information early
-2. **Consent-based disclosure** — players choose to reveal (in opt-in mode)
-3. **Drama is a feature** — the timing and animation of reveals matter
-4. **Truth is verifiable** — revealed values are proven to match commitments
-5. **The God Window is optional** — it enhances but is not required
+### Salt management
+
+**Problem**: salt must persist from entry to reveal. Browser localStorage is fragile.
+
+**Solution tiers**:
+1. **MVP**: localStorage (acceptable for hackathon)
+2. **v1**: Lace wallet-integrated encrypted storage
+3. **v2**: DIDz-based social recovery (guardian-assisted salt recovery)
+
+**If salt is lost**: player cannot reveal. Their answer stays hidden forever. The UI warns clearly at entry time: "Save your recovery phrase to prevent loss."
+
+### On-chain storage efficiency
+
+Each revealed answer costs ~32 bytes (a Uint<64> value + key). For a 30-player round with full reveal, that's ~1KB of ledger data. Negligible.
+
+### Verification cost
+
+The reveal circuit runs `persistentHash` once and compares. ZK proof generation for this circuit is light (~1-2 seconds client-side). No concerns.
+
+---
+
+## 7. Privacy Considerations
+
+### God Mode is OPT-IN (except FullReveal config)
+
+Players who value privacy can refuse to reveal. Their answer stays secret forever. The contract doesn't coerce.
+
+### Once revealed, permanent
+
+A revealed answer is written to `revealedAnswers`. It's on-chain public data forever. This is a one-way door.
+
+### Salt loss = de facto privacy
+
+If a player loses their salt, they literally cannot reveal even if they wanted to. This is a *feature*, not a bug — it's an escape hatch for players who want mandatory privacy.
+
+### Correlation attacks
+
+Over many rounds with opt-in reveals, a sophisticated observer could build a profile of a player's "revealing habits" — maybe they always reveal wins, never losses. This leaks some strategy info but doesn't break core privacy.
+
+---
+
+## 8. Spectator & Content Integration
+
+### Streaming layouts
+Pre-designed OBS layouts for streamers:
+- Game view with pool status
+- Post-settlement reveal sequence
+- Player leaderboard
+
+### Discord bot
+`/blindoracle round 42` → posts a summary with revealed answers, pairings, outcomes. Auto-posts after every round in subscribed channels.
+
+### Twitter auto-post
+Opt-in: "My round #42 result → https://blindoracle.io/r/42/me" with auto-generated share image.
+
+### Leaderboard integration
+Public record of revealed answers can power:
+- Top-10 guessers (highest hit rate)
+- Most-revealed (opt-in transparency kings)
+- Near-miss hall of fame (always within 1, never exactly right)
+
+---
+
+## 9. Design Principles
+
+1. **Drama > Information** — reveals should feel like a climax, not a data dump
+2. **Opt-in by default** — never coerce revealing (except explicit FullReveal rounds)
+3. **Cryptographic integrity** — every reveal is contract-verified
+4. **Shareable moments** — UI optimized for content creation
+5. **Reversal-proof** — once revealed, always revealed (no "undo")
+
+---
+
+## 10. Future God Mode Features
+
+### Weighted reveals (reward mechanic)
+Players who reveal first get a small bonus (XP, cosmetic unlocks). Encourages dramatic reveals in OptIn mode.
+
+### Partial reveals
+Reveal only a hint: "My answer was between 5 and 8." ZK proof of range without revealing exact.
+
+### Batched reveal event
+A ritualized "reveal hour" where all opt-in players reveal simultaneously. Very streamable.
+
+### Cross-round reveal patterns
+Track a player's reveal history. "Alice has revealed 12 rounds, always showing an answer above 5." Pattern visibility without forcing reveals.
+
+### Tournament finale reveal
+In tournament mode, final round forces all participants to reveal for the bracket replay. Creates dramatic tournament-end moments.
+
+---
+
+## 11. Related Documents
+
+- [`MECHANICS.md §9`](./MECHANICS.md#9-god-mode-post-settlement-reveal) — the exact contract behavior
+- [`RULES_MVP.md §9`](./RULES_MVP.md#9-god-mode-post-settlement-reveal) — player-facing rules
+- [`ARCHITECTURE.md §7`](./ARCHITECTURE.md#7-privacy-architecture) — privacy model
+- [`WHAT_YOURE_NOT_THINKING_ABOUT.md`](./WHAT_YOURE_NOT_THINKING_ABOUT.md) — salt recovery concerns

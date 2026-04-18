@@ -34,7 +34,27 @@ It's a **demonstration of what becomes possible when privacy is a protocol featu
 
 ---
 
-## 🎭 The Four Acts of a Round
+## �️ The Three Pools
+
+> *You are one of thirty. You do not know which twelve you play among.*
+
+Every round, the contract maintains **three parallel pools** of players. When you enter, you're **invisibly assigned** to one. You don't know which. Your opponent is always from your pool — but you never learn the pool's boundary.
+
+Each pool:
+- Is pre-seeded with **AI participants** during Forming (so the game feels active from entry one)
+- Accepts real players up to `poolMaxRealPlayers`
+- Must reach `poolMinRealPlayers` real players before the round can activate
+- Runs its own independent matching at settlement
+
+When **all three pools** are ready, the round locks. Bots vanish. Real players face each other.
+
+**Anti-crowd cap** prevents pile-ups: at most `N` players per pool may choose any given guess value. If the bucket is full in your pool, you pick another number.
+
+**90/10 split**: winners take 90% of each pair's pot. The house retains 10%.
+
+---
+
+## �🎭 The Four Acts of a Round
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
