@@ -1,0 +1,50 @@
+# BlindOracle — Local Midnight stack for undeployed development
+# Run: docker compose -f undeployed-compose.yml up -d
+
+services:
+  proof-server:
+    image: midnightnetwork/proof-server:4.0.0
+    container_name: blindoracle-proof-server
+    ports:
+      - '6300:6300'
+    environment:
+      RUST_BACKTRACE: 'full'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:6300/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    image: midnightnetwork/indexer-standalone:2.1.0
+    container_name: blindoracle-indexer
+    ports:
+      - '8088:8088'
+    environment:
+      RUST_LOG: info
+    depends_on:
+      node:
+        condition: service_started
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:8088/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  node:
+    image: midnightnetwork/midnight-node:0.13.0-alpha.2
+    container_name: blindoracle-node
+    ports:
+      - '9944:9944'
+      - '9933:9933'
+    command:
+      - '--dev'
+      - '--rpc-external'
+      - '--ws-external'
+      - '--rpc-cors=all'
+      - '--unsafe-rpc-external'
+    volumes:
+      - blindoracle-node-data:/data
+
+volumes:
+  blindoracle-node-data:

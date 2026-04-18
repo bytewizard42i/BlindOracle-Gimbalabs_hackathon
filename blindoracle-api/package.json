@@ -1,0 +1,32 @@
+{
+  "name": "blindoracle-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BlindOracle — shared types, game logic, and runtime configuration",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "3.1.0",
+    "@midnight-ntwrk/midnight-js-types": "3.1.0",
+    "@midnight-ntwrk/midnight-js-network-id": "2.1.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
