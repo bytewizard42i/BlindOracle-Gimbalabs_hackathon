@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", "tsconfig*.json"],
+      "outputs": []
+    },
+    "compact": {
+      "inputs": ["compact/**/*.compact"],
+      "outputs": ["src/managed/**", "contract-generated/**"],
+      "cache": true
+    },
+    "build": {
+      "dependsOn": ["^build", "compact", "typecheck"],
+      "inputs": ["src/**/*.ts", "src/**/*.tsx", "tsconfig*.json"],
+      "outputs": ["dist/**"]
+    },
+    "lint": {
+      "inputs": ["src/**/*.ts", "src/**/*.tsx"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["build"],
+      "inputs": ["src/**/*.ts", "src/**/*.test.ts", "tests/**"],
+      "outputs": ["coverage/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "start": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

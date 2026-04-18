@@ -1,0 +1,40 @@
+{
+  "name": "blindoracle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BlindOracle — Privacy-preserving prediction game on Midnight Network (Gimbalabs Hackathon)",
+  "license": "Apache-2.0",
+  "author": "John Santi <bytewizard42i>",
+  "workspaces": [
+    "blindoracle-contract",
+    "blindoracle-api",
+    "blindoracle-ui"
+  ],
+  "scripts": {
+    "compact": "turbo run compact",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev --parallel",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "typescript": "~5.7.0",
+    "prettier": "^3.4.0"
+  },
+  "resolutions": {
+    "@midnight-ntwrk/compact-runtime": "3.1.0",
+    "@midnight-ntwrk/midnight-js-contracts": "3.1.0",
+    "@midnight-ntwrk/midnight-js-types": "3.1.0",
+    "@midnight-ntwrk/midnight-js-network-id": "2.1.0",
+    "@midnight-ntwrk/ledger": "3.1.0",
+    "@midnight-ntwrk/wallet": "3.1.0",
+    "@midnight-ntwrk/zswap": "3.1.0"
+  },
+  "packageManager": "yarn@4.6.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

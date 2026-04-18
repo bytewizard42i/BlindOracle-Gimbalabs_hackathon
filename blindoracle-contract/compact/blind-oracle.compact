@@ -1,0 +1,189 @@
+pragma language_version >= 0.16 && <= 0.21;
+
+import CompactStandardLibrary;
+
+// ============================================================================
+// BlindOracle — Privacy-Preserving Prediction Game
+// ============================================================================
+//
+// Round lifecycle:  0=Open → 1=Locked → 2=Settling → 3=Settled
+//
+// Players commit a secret number and a guess as hiding commitments.
+// After the round locks, an oracle (round manager) submits match results.
+// Settlement distributes payouts based on correct guesses.
+// An optional God Window circuit allows post-settlement reveal of raw values.
+// ============================================================================
+
+// --- Enums ---
+
+export enum RoundPhase {
+  open,
+  locked,
+  settling,
+  settled
+}
+
+// --- Ledger State ---
+
+// Round management
+export ledger roundPhase: Uint<0..3>;
+export ledger roundId: Counter;
+export ledger playerCount: Counter;
+
+// Player commitments: playerPk → commitment hash
+export ledger secretCommitments: Map<Bytes<32>, Bytes<32>>;
+export ledger guessCommitments: Map<Bytes<32>, Bytes<32>>;
+
+// Settlement results: playerPk → payout amount (0 = lost)
+export ledger payouts: Map<Bytes<32>, Uint<64>>;
+
+// God Window revealed values (post-settlement only)
+export ledger revealedSecrets: Map<Bytes<32>, Uint<64>>;
+export ledger revealedGuesses: Map<Bytes<32>, Uint<64>>;
+
+// Configuration
+export ledger owner: Bytes<32>;
+export ledger stakeAmount: Uint<64>;
+export ledger maxPlayers: Uint<64>;
+export ledger protocolFeeBps: Uint<64>;
+
+// --- Witnesses ---
+
+witness local_secret_key(): Bytes<32>;
+witness get_secret_number(): Uint<64>;
+witness get_guess_number(): Uint<64>;
+witness get_round_entropy(): Bytes<32>;
+
+// --- Constructor ---
+
+constructor(
+  admin_pk: Bytes<32>,
+  stake: Uint<64>,
+  max_players: Uint<64>,
+  fee_bps: Uint<64>
+) {
+  owner = admin_pk;
+  stakeAmount = stake;
+  maxPlayers = max_players;
+  protocolFeeBps = fee_bps;
+  roundPhase = 0;
+}
+
+// --- Circuits ---
+
+// Player enters the round by committing a secret and a guess.
+// The raw values never leave the prover — only their commitments go on-chain.
+export circuit enter_round(
+  player_pk: Bytes<32>,
+  secret_commitment: Bytes<32>,
+  guess_commitment: Bytes<32>
+): [] {
+  // Round must be open
+  assert(disclose(roundPhase == 0), "Round not open");
+
+  // Player must not have already entered
+  assert(disclose(!secretCommitments.member(player_pk)), "Already entered");
+
+  // Store commitments
+  secretCommitments.insert(player_pk, secret_commitment);
+  guessCommitments.insert(player_pk, guess_commitment);
+  playerCount.increment(1);
+}
+
+// Admin locks the round — no more entries allowed.
+export circuit lock_round(): [] {
+  const sk = local_secret_key();
+  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "midnight:pk:"),
+    sk
+  ]);
+  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
+  assert(disclose(roundPhase == 0), "Round not open");
+
+  roundPhase = 1;
+}
+
+// Oracle submits a match result for one pair of players.
+// Called once per pair during the settling phase.
+export circuit submit_match_result(
+  player_a_pk: Bytes<32>,
+  player_b_pk: Bytes<32>,
+  payout_a: Uint<64>,
+  payout_b: Uint<64>
+): [] {
+  const sk = local_secret_key();
+  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "midnight:pk:"),
+    sk
+  ]);
+  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
+  assert(disclose(roundPhase == 1), "Round not locked");
+
+  // Record payouts for both players
+  payouts.insert(player_a_pk, payout_a);
+  payouts.insert(player_b_pk, payout_b);
+}
+
+// Admin transitions round to settled after all match results are submitted.
+export circuit settle_round(): [] {
+  const sk = local_secret_key();
+  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "midnight:pk:"),
+    sk
+  ]);
+  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
+  assert(disclose(roundPhase == 1), "Round not locked");
+
+  roundPhase = 3;
+}
+
+// God Window: player voluntarily reveals their secret and guess post-settlement.
+// The circuit verifies the revealed values match the original commitments.
+export circuit reveal_for_god_window(
+  player_pk: Bytes<32>,
+  secret: Uint<64>,
+  guess: Uint<64>
+): [] {
+  // Round must be settled
+  assert(disclose(roundPhase == 3), "Round not settled");
+
+  // Verify the player has commitments on record
+  assert(disclose(secretCommitments.member(player_pk)), "No commitment found");
+
+  // Verify revealed secret matches original commitment
+  const expected_secret_commit = (persistentCommit<Uint<64>>(secret) as Field) as Bytes<32>;
+  const stored_secret = secretCommitments.lookup(player_pk);
+  assert(disclose(expected_secret_commit == stored_secret), "Secret mismatch");
+
+  // Verify revealed guess matches original guess commitment
+  const expected_guess_commit = (persistentCommit<Uint<64>>(guess) as Field) as Bytes<32>;
+  const stored_guess = guessCommitments.lookup(player_pk);
+  assert(disclose(expected_guess_commit == stored_guess), "Guess mismatch");
+
+  // Store revealed values for God Window display
+  revealedSecrets.insert(player_pk, secret);
+  revealedGuesses.insert(player_pk, guess);
+}
+
+// Admin resets the contract for a new round.
+export circuit new_round(): [] {
+  const sk = local_secret_key();
+  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "midnight:pk:"),
+    sk
+  ]);
+  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
+  assert(disclose(roundPhase == 3), "Current round not settled");
+
+  // Clear all round data
+  secretCommitments.resetToDefault();
+  guessCommitments.resetToDefault();
+  payouts.resetToDefault();
+  revealedSecrets.resetToDefault();
+  revealedGuesses.resetToDefault();
+  playerCount.resetToDefault();
+
+  // Advance round counter and reopen
+  roundId.increment(1);
+  roundPhase = 0;
+}
