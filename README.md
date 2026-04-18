@@ -177,12 +177,13 @@ BlindOracle is **dark, premium, elegant, and intentionally mysterious**. Not car
 |----------|---------------|
 | [`README.md`](./README.md) | You are here |
 | [`DEPLOYMENT.md`](./DEPLOYMENT.md) | Full deployment guide (local → testnet → mainnet) |
-| [`docs/RULES_MVP.md`](./docs/RULES_MVP.md) | MVP game rules, parameters, anti-cheat properties |
-| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Contract, SDK, UI layers + privacy model |
+| [`docs/MECHANICS.md`](./docs/MECHANICS.md) | **Authoritative protocol mechanics, vocabulary, state machine** |
+| [`docs/RULES_MVP.md`](./docs/RULES_MVP.md) | MVP rulebook with scoring, anti-crowd cap, min-player gating |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Contract / SDK / UI layers + privacy model |
 | [`docs/PITCH.md`](./docs/PITCH.md) | Hackathon pitch, market fit, taglines |
 | [`docs/GOD_WINDOW.md`](./docs/GOD_WINDOW.md) | Post-settlement reveal design |
-| [`docs/GAMBLING_COMPLIANCE.md`](./docs/GAMBLING_COMPLIANCE.md) | US vs offshore legal analysis, jurisdictional strategy |
-| [`docs/WHAT_YOURE_NOT_THINKING_ABOUT.md`](./docs/WHAT_YOURE_NOT_THINKING_ABOUT.md) | Blind spots, adversarial scenarios, gotchas |
+| [`docs/GAMBLING_COMPLIANCE.md`](./docs/GAMBLING_COMPLIANCE.md) | US vs offshore legal analysis, sweepstakes strategy |
+| [`docs/WHAT_YOURE_NOT_THINKING_ABOUT.md`](./docs/WHAT_YOURE_NOT_THINKING_ABOUT.md) | Blind spots with **real solutions** for every problem |
 | [`FUTURE_FUNCTIONALITY.md`](./FUTURE_FUNCTIONALITY.md) | Expansion roadmap beyond MVP |
 
 ---

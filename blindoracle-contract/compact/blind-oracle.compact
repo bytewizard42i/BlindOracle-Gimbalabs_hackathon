@@ -6,105 +6,284 @@ import CompactStandardLibrary;
 // BlindOracle — Privacy-Preserving Prediction Game
 // ============================================================================
 //
-// Round lifecycle:  0=Open → 1=Locked → 2=Settling → 3=Settled
+// Vocabulary (CRITICAL — do not conflate these two concepts):
 //
-// Players commit a secret number and a guess as hiding commitments.
-// After the round locks, an oracle (round manager) submits match results.
-// Settlement distributes payouts based on correct guesses.
-// An optional God Window circuit allows post-settlement reveal of raw values.
+//   answer:  The number a player locks in for OTHER players to try to guess.
+//            PRIVATE — stored only as a hiding commitment on-chain.
+//            NEVER capacity-capped. Every player can choose any answer they
+//            want, because limiting answers would reduce the population of
+//            potential winners.
+//
+//   guess:   The number a player is betting their opponent's answer will be.
+//            PUBLIC at commit time — stored directly on-chain as a plain
+//            Uint, which is what enables the anti-crowd cap.
+//            CAPACITY-CAPPED — at most `maxGuessesPerNumber` players can
+//            guess any single number. Prevents runaway pile-ups on "lucky"
+//            numbers and keeps the payout distribution healthy.
+//
+// Round lifecycle:
+//   0 = Forming    — entries accepted, but < minPlayers so the round has
+//                    not officially started.
+//   1 = Open       — minPlayers reached; entry window counting down.
+//                    Entries still accepted until the owner locks or the
+//                    window expires.
+//   2 = Locked     — no more entries; matching and settlement in progress.
+//   3 = Settling   — match results being submitted one pair at a time.
+//   4 = Settled    — all match results submitted; payouts claimable.
+//   5 = Aborted    — entry window closed with < minPlayers. Refunds
+//                    claimable by each player. Terminal until new_round().
 // ============================================================================
 
-// --- Enums ---
+// --- Round Phase ---
 
 export enum RoundPhase {
+  forming,
   open,
   locked,
   settling,
-  settled
+  settled,
+  aborted
 }
 
 // --- Ledger State ---
 
-// Round management
-export ledger roundPhase: Uint<0..3>;
+// Round phase transitions follow a strict state machine (see above).
+// Uint<0..N> uses EXCLUSIVE upper bound in Compact, so 0..6 allows 0..=5.
+export ledger roundPhase: Uint<0..6>;
 export ledger roundId: Counter;
 export ledger playerCount: Counter;
 
-// Player commitments: playerPk → commitment hash
-export ledger secretCommitments: Map<Bytes<32>, Bytes<32>>;
-export ledger guessCommitments: Map<Bytes<32>, Bytes<32>>;
+// The PRIVATE half of every entry.
+// player_pk -> hiding commitment of (answer, salt).
+export ledger answerCommitments: Map<Bytes<32>, Bytes<32>>;
 
-// Settlement results: playerPk → payout amount (0 = lost)
+// The PUBLIC half of every entry.
+// player_pk -> the plain guess value this player submitted.
+export ledger playerGuesses: Map<Bytes<32>, Uint<64>>;
+
+// Anti-crowd tally. guess_value -> number of players who chose that guess.
+// Written by enter_round; checked before accepting a new entry.
+export ledger guessBucketCounts: Map<Uint<64>, Uint<64>>;
+
+// Settlement results: player_pk -> final payout in NIGHT base units.
+// 0 means "lost" (or not yet settled). Non-zero means claim available.
 export ledger payouts: Map<Bytes<32>, Uint<64>>;
 
-// God Window revealed values (post-settlement only)
-export ledger revealedSecrets: Map<Bytes<32>, Uint<64>>;
-export ledger revealedGuesses: Map<Bytes<32>, Uint<64>>;
+// Tracks whether a player has already claimed their payout or refund.
+export ledger claimed: Map<Bytes<32>, Boolean>;
 
-// Configuration
-export ledger owner: Bytes<32>;
-export ledger stakeAmount: Uint<64>;
-export ledger maxPlayers: Uint<64>;
-export ledger protocolFeeBps: Uint<64>;
+// God Window revealed values (post-settlement only).
+export ledger revealedAnswers: Map<Bytes<32>, Uint<64>>;
+
+// --- Sealed Configuration ---
+// These are set once in the constructor and never change.
+
+export sealed ledger owner: Bytes<32>;
+
+// Fixed stake per player (in NIGHT base units). Off-chain settlement
+// service uses this and `payouts` to move coins.
+export sealed ledger stakeAmount: Uint<64>;
+
+// Minimum players required for the round to progress from Forming to Open.
+// If the entry window expires with playerCount < minPlayers, the round
+// can be Aborted and all stakes refunded.
+export sealed ledger minPlayers: Uint<64>;
+
+// Maximum players per round (hard ceiling).
+export sealed ledger maxPlayers: Uint<64>;
+
+// Anti-crowd cap. No single guess value may be chosen by more than this
+// many players. Example: range 1-10 with cap 3 allows max 30 players total.
+export sealed ledger maxGuessesPerNumber: Uint<64>;
+
+// Valid guess range [guessMin, guessMax] inclusive. Answers use the same
+// range (validated off-chain before commitment).
+export sealed ledger guessMin: Uint<64>;
+export sealed ledger guessMax: Uint<64>;
+
+// Protocol fee in basis points. 200 = 2%.
+export sealed ledger protocolFeeBps: Uint<64>;
 
 // --- Witnesses ---
 
+// The player's local signing key (used to derive their public identity).
 witness local_secret_key(): Bytes<32>;
-witness get_secret_number(): Uint<64>;
-witness get_guess_number(): Uint<64>;
-witness get_round_entropy(): Bytes<32>;
+
+// The player's own answer value (never revealed to the chain).
+witness get_my_answer(): Uint<64>;
+
+// A random salt mixed into the answer commitment. Without a salt, two
+// players who pick the same answer produce the same commitment, leaking
+// information. Must be freshly generated per round per player.
+witness get_answer_salt(): Bytes<32>;
 
 // --- Constructor ---
 
 constructor(
   admin_pk: Bytes<32>,
   stake: Uint<64>,
+  min_players: Uint<64>,
   max_players: Uint<64>,
+  max_guesses_per_number: Uint<64>,
+  guess_min: Uint<64>,
+  guess_max: Uint<64>,
   fee_bps: Uint<64>
 ) {
-  owner = admin_pk;
-  stakeAmount = stake;
-  maxPlayers = max_players;
-  protocolFeeBps = fee_bps;
+  owner = disclose(admin_pk);
+  stakeAmount = disclose(stake);
+  minPlayers = disclose(min_players);
+  maxPlayers = disclose(max_players);
+  maxGuessesPerNumber = disclose(max_guesses_per_number);
+  guessMin = disclose(guess_min);
+  guessMax = disclose(guess_max);
+  protocolFeeBps = disclose(fee_bps);
   roundPhase = 0;
+}
+
+// --- Helper: derive caller public key ---
+
+// Compact pattern for public key derivation (public_key() is NOT a builtin).
+// Every authorization check uses this helper.
+pure circuit derive_caller_pk(sk: Bytes<32>): Bytes<32> {
+  const pk_field = persistentHash<Vector<2, Bytes<32>>>([
+    pad(32, "midnight:pk:"),
+    sk
+  ]);
+  return (pk_field as Field) as Bytes<32>;
 }
 
 // --- Circuits ---
 
-// Player enters the round by committing a secret and a guess.
-// The raw values never leave the prover — only their commitments go on-chain.
+// Enter a round.
+//
+//   player_pk          — caller's public key (verified against local_secret_key)
+//   answer_commitment  — persistentCommit of (answer, salt) — hides the answer
+//   guess_number       — the player's PUBLIC guess of opponent's answer
+//
+// Rules enforced on-chain:
+//   1. Round must be Forming (0) or Open (1).
+//   2. Caller must not have already entered this round.
+//   3. Guess must be in [guessMin, guessMax].
+//   4. Guess bucket must not be full (< maxGuessesPerNumber players already
+//      chose this number).
+//   5. Round must not be at maxPlayers.
+//   6. If the entry brings playerCount to minPlayers, auto-advance Forming -> Open.
+//
+// NOTE: The entry window timer (for transitioning from Open to Locked) is
+// enforced off-chain by the owner calling lock_round() when the window
+// expires, OR abort_round() if playerCount is still below minPlayers.
 export circuit enter_round(
   player_pk: Bytes<32>,
-  secret_commitment: Bytes<32>,
-  guess_commitment: Bytes<32>
+  answer_commitment: Bytes<32>,
+  guess_number: Uint<64>
 ): [] {
-  // Round must be open
-  assert(disclose(roundPhase == 0), "Round not open");
+  // 1. Phase check
+  const phase = roundPhase;
+  assert(disclose(phase == 0 || phase == 1), "Round not accepting entries");
 
-  // Player must not have already entered
-  assert(disclose(!secretCommitments.member(player_pk)), "Already entered");
+  // 2. Identity check: the caller's derived pk must match the declared player_pk
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Store commitments
-  secretCommitments.insert(player_pk, secret_commitment);
-  guessCommitments.insert(player_pk, guess_commitment);
+  // Disclose params once and reuse
+  const pk_disclosed = disclose(player_pk);
+  const guess_disclosed = disclose(guess_number);
+
+  // 3. Duplicate entry check
+  assert(disclose(!answerCommitments.member(pk_disclosed)), "Already entered");
+
+  // 4. Guess range check (split && into two assertions to avoid short-circuit branch)
+  assert(disclose(guess_disclosed >= guessMin), "Guess below minimum");
+  assert(disclose(guess_disclosed <= guessMax), "Guess above maximum");
+
+  // 5. Guess bucket capacity check
+  // Map.lookup() returns default (0) for missing keys, so no member check needed.
+  const current_bucket_count = guessBucketCounts.lookup(guess_disclosed);
+  assert(
+    disclose(current_bucket_count < maxGuessesPerNumber),
+    "Guess bucket full - pick a different number"
+  );
+
+  // 6. Max players check
+  assert(disclose(playerCount.read() < maxPlayers), "Round is full");
+
+  // Record entry
+  answerCommitments.insert(pk_disclosed, disclose(answer_commitment));
+  playerGuesses.insert(pk_disclosed, guess_disclosed);
+  guessBucketCounts.insert(
+    guess_disclosed,
+    (current_bucket_count + 1) as Uint<64>
+  );
+  claimed.insert(pk_disclosed, false);
   playerCount.increment(1);
+
+  // Auto-advance Forming -> Open when minPlayers reached
+  if (disclose(phase == 0 && playerCount.read() >= minPlayers)) {
+    roundPhase = 1;
+  }
 }
 
-// Admin locks the round — no more entries allowed.
+// Owner locks the round. Valid only from Open (1). Transitions to Locked (2).
+// Off-chain, the owner calls this when the entry window expires with enough
+// players. If the window expires with too few players, the owner calls
+// abort_round() instead.
 export circuit lock_round(): [] {
   const sk = local_secret_key();
-  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
-    pad(32, "midnight:pk:"),
-    sk
-  ]);
-  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
-  assert(disclose(roundPhase == 0), "Round not open");
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+  assert(disclose(roundPhase == 1), "Round must be Open to lock");
+  assert(disclose(playerCount.read() >= minPlayers), "Below minimum players");
 
-  roundPhase = 1;
+  roundPhase = 2;
 }
 
-// Oracle submits a match result for one pair of players.
-// Called once per pair during the settling phase.
+// Owner aborts the round. Valid only from Forming (0) when the entry
+// window expires below minPlayers. Transitions to Aborted (5), enabling
+// every player to claim a full refund.
+export circuit abort_round(): [] {
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+  assert(disclose(roundPhase == 0), "Can only abort from Forming");
+
+  roundPhase = 5;
+}
+
+// Player claims a refund after the round is Aborted. Idempotent: can only
+// be claimed once per player. The actual coin movement happens off-chain
+// via the settlement service reading `payouts` and `claimed`.
+export circuit claim_refund(player_pk: Bytes<32>): [] {
+  const pk_disclosed = disclose(player_pk);
+
+  // Must be in Aborted state
+  assert(disclose(roundPhase == 5), "Round not aborted");
+
+  // Must be a participant
+  assert(disclose(answerCommitments.member(pk_disclosed)), "Not a participant");
+
+  // Must not already have claimed
+  assert(disclose(!claimed.lookup(pk_disclosed)), "Refund already claimed");
+
+  // Caller must be the player themselves
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
+
+  // Record the refund amount (full stake, no fee on aborted rounds)
+  payouts.insert(pk_disclosed, stakeAmount);
+  claimed.insert(pk_disclosed, true);
+}
+
+// Owner submits the result of one matched pair. Valid only from Locked (2)
+// or Settling (3). On first call, transitions Locked -> Settling.
+//
+// The off-chain matching service pairs players via deterministic randomness
+// (derived from all commitments), computes payouts per scoreMatch() rules,
+// and calls this circuit once per pair.
+//
+// For unpaired players (odd count), the owner calls submit_unpaired_refund
+// instead.
 export circuit submit_match_result(
   player_a_pk: Bytes<32>,
   player_b_pk: Bytes<32>,
@@ -112,78 +291,120 @@ export circuit submit_match_result(
   payout_b: Uint<64>
 ): [] {
   const sk = local_secret_key();
-  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
-    pad(32, "midnight:pk:"),
-    sk
-  ]);
-  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
-  assert(disclose(roundPhase == 1), "Round not locked");
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
 
-  // Record payouts for both players
-  payouts.insert(player_a_pk, payout_a);
-  payouts.insert(player_b_pk, payout_b);
+  const phase = roundPhase;
+  assert(disclose(phase == 2 || phase == 3), "Round not in settlement phase");
+
+  const a_disclosed = disclose(player_a_pk);
+  const b_disclosed = disclose(player_b_pk);
+
+  // Both players must be participants
+  assert(disclose(answerCommitments.member(a_disclosed)), "Player A not in round");
+  assert(disclose(answerCommitments.member(b_disclosed)), "Player B not in round");
+
+  // Payouts not already assigned (prevent double-settlement)
+  assert(disclose(!payouts.member(a_disclosed)), "Player A already settled");
+  assert(disclose(!payouts.member(b_disclosed)), "Player B already settled");
+
+  payouts.insert(a_disclosed, disclose(payout_a));
+  payouts.insert(b_disclosed, disclose(payout_b));
+
+  // First call transitions Locked -> Settling
+  if (disclose(phase == 2)) {
+    roundPhase = 3;
+  }
 }
 
-// Admin transitions round to settled after all match results are submitted.
+// Owner refunds a player who couldn't be paired (odd player count).
+export circuit submit_unpaired_refund(player_pk: Bytes<32>): [] {
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+
+  const phase = roundPhase;
+  assert(disclose(phase == 2 || phase == 3), "Round not in settlement phase");
+
+  const pk_disclosed = disclose(player_pk);
+  assert(disclose(answerCommitments.member(pk_disclosed)), "Player not in round");
+  assert(disclose(!payouts.member(pk_disclosed)), "Player already settled");
+
+  // Full stake refund for unpaired
+  payouts.insert(pk_disclosed, stakeAmount);
+
+  if (disclose(phase == 2)) {
+    roundPhase = 3;
+  }
+}
+
+// Owner finalizes the round. Valid from Settling (3). Transitions to
+// Settled (4). All payouts must be assigned before this is called.
 export circuit settle_round(): [] {
   const sk = local_secret_key();
-  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
-    pad(32, "midnight:pk:"),
-    sk
-  ]);
-  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
-  assert(disclose(roundPhase == 1), "Round not locked");
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+  assert(disclose(roundPhase == 3), "Round must be Settling to finalize");
 
-  roundPhase = 3;
+  roundPhase = 4;
 }
 
-// God Window: player voluntarily reveals their secret and guess post-settlement.
-// The circuit verifies the revealed values match the original commitments.
+// Player reveals their answer for the God Window display.
+// Valid from Settled (4). Verifies the revealed value matches the original
+// commitment.
+//
+// The salt is NOT stored on-chain; the player must provide it here to
+// reconstruct the commitment. Off-chain UX stores the salt in the player's
+// wallet/localStorage keyed by round ID.
 export circuit reveal_for_god_window(
   player_pk: Bytes<32>,
-  secret: Uint<64>,
-  guess: Uint<64>
+  answer: Uint<64>,
+  salt: Bytes<32>
 ): [] {
-  // Round must be settled
-  assert(disclose(roundPhase == 3), "Round not settled");
+  assert(disclose(roundPhase == 4), "Round not settled");
 
-  // Verify the player has commitments on record
-  assert(disclose(secretCommitments.member(player_pk)), "No commitment found");
+  const pk_disclosed = disclose(player_pk);
+  assert(disclose(answerCommitments.member(pk_disclosed)), "No commitment found");
 
-  // Verify revealed secret matches original commitment
-  const expected_secret_commit = (persistentCommit<Uint<64>>(secret) as Field) as Bytes<32>;
-  const stored_secret = secretCommitments.lookup(player_pk);
-  assert(disclose(expected_secret_commit == stored_secret), "Secret mismatch");
+  // Caller must be the player themselves
+  const sk = local_secret_key();
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == player_pk), "Caller pk mismatch");
 
-  // Verify revealed guess matches original guess commitment
-  const expected_guess_commit = (persistentCommit<Uint<64>>(guess) as Field) as Bytes<32>;
-  const stored_guess = guessCommitments.lookup(player_pk);
-  assert(disclose(expected_guess_commit == stored_guess), "Guess mismatch");
+  // Recompute the commitment and verify it matches what's stored
+  const answer_bytes = (answer as Field) as Bytes<32>;
+  const computed_commitment = persistentHash<Vector<2, Bytes<32>>>([
+    answer_bytes,
+    salt
+  ]);
+  const stored_commitment = answerCommitments.lookup(pk_disclosed);
+  assert(
+    disclose(computed_commitment == stored_commitment),
+    "Commitment mismatch - answer or salt incorrect"
+  );
 
-  // Store revealed values for God Window display
-  revealedSecrets.insert(player_pk, secret);
-  revealedGuesses.insert(player_pk, guess);
+  revealedAnswers.insert(pk_disclosed, disclose(answer));
 }
 
-// Admin resets the contract for a new round.
+// Owner resets the contract for a new round. Valid from Settled (4) or
+// Aborted (5). Clears all round data and advances the round counter.
 export circuit new_round(): [] {
   const sk = local_secret_key();
-  const caller_pk = persistentHash<Vector<2, Bytes<32>>>([
-    pad(32, "midnight:pk:"),
-    sk
-  ]);
-  assert(disclose((caller_pk as Field) as Bytes<32> == owner), "Not owner");
-  assert(disclose(roundPhase == 3), "Current round not settled");
+  const caller_pk = derive_caller_pk(sk);
+  assert(disclose(caller_pk == owner), "Not owner");
+
+  const phase = roundPhase;
+  assert(disclose(phase == 4 || phase == 5), "Round must be terminal to restart");
 
   // Clear all round data
-  secretCommitments.resetToDefault();
-  guessCommitments.resetToDefault();
+  answerCommitments.resetToDefault();
+  playerGuesses.resetToDefault();
+  guessBucketCounts.resetToDefault();
   payouts.resetToDefault();
-  revealedSecrets.resetToDefault();
-  revealedGuesses.resetToDefault();
+  claimed.resetToDefault();
+  revealedAnswers.resetToDefault();
   playerCount.resetToDefault();
 
-  // Advance round counter and reopen
   roundId.increment(1);
   roundPhase = 0;
 }

@@ -1,12 +1,16 @@
 /**
- * BlindOracle — Runtime Configuration
+ * BlindOracle — Runtime & Round Configuration Defaults
  *
- * Default per-environment configs. The UI loads a live config from
- * `public/config.json` at startup which can override these defaults.
+ * The UI loads a live config from `public/config.json` at startup which
+ * can override these defaults per-environment.
  */
 
-import type { RuntimeConfig, RoundConfig } from './common-types.js';
+import type { RoundConfig, RuntimeConfig } from './common-types.js';
 import { GodWindowMode } from './common-types.js';
+
+// ============================================================================
+// Network Configs
+// ============================================================================
 
 export const UNDEPLOYED_CONFIG: RuntimeConfig = {
   networkId: 'undeployed',
@@ -36,33 +40,84 @@ export const MAINNET_CONFIG: RuntimeConfig = {
   contractAddress: null,
 };
 
+// ============================================================================
+// Round Configs
+// ============================================================================
+
 /**
- * Default MVP round configuration — the hackathon baseline.
- * Range 1-10, 2-player fixed stake, 5 min entry window, opt-in God Window.
+ * MVP hackathon demo config.
+ *
+ * Design rationale:
+ *   - Range 1-10 + maxGuessesPerNumber=3 → max 30 players (10*3).
+ *     Keeps each round compact and shippable.
+ *   - minPlayers=2 so the contract actually progresses with low turnout.
+ *   - 2-minute entry window (off-chain, enforced by owner).
+ *   - Zero protocol fee → free-play showcase, no gambling concerns.
+ *   - Full God Window reveal for maximum demo drama.
  */
-export const DEFAULT_ROUND_CONFIG: RoundConfig = {
-  secretMin: 1,
-  secretMax: 10,
+export const DEMO_ROUND_CONFIG: RoundConfig = {
+  owner: '0x' + '0'.repeat(64), // placeholder, set at deployment
+  stakeAmount: 0n, // free-play for hackathon
+  minPlayers: 2,
+  maxPlayers: 30,
+  maxGuessesPerNumber: 3,
   guessMin: 1,
   guessMax: 10,
-  stakeAmount: 1_000_000n, // 1 NIGHT (assuming 6 decimals)
-  minPlayers: 2,
-  maxPlayers: 20,
-  entryWindowSeconds: 300,
-  protocolFeeBps: 200, // 2%
-  godWindow: GodWindowMode.OptIn,
+  protocolFeeBps: 0,
+  godWindow: GodWindowMode.FullReveal,
+  entryWindowSeconds: 120,
 };
 
-/** Hackathon demo config — wider range, smaller stake, fast rounds, full reveal for showcase */
-export const DEMO_ROUND_CONFIG: RoundConfig = {
-  secretMin: 1,
-  secretMax: 20,
+/**
+ * Standard production round config.
+ *
+ * Design rationale:
+ *   - Range 1-10 + maxGuessesPerNumber=5 → max 50 players.
+ *   - minPlayers=4 so there are real stakes (at least 2 pairings).
+ *   - 5-minute entry window.
+ *   - 2% protocol fee.
+ *   - Opt-in God Window.
+ */
+export const STANDARD_ROUND_CONFIG: RoundConfig = {
+  owner: '0x' + '0'.repeat(64),
+  stakeAmount: 1_000_000n, // 1 NIGHT (assuming 6 decimals)
+  minPlayers: 4,
+  maxPlayers: 50,
+  maxGuessesPerNumber: 5,
+  guessMin: 1,
+  guessMax: 10,
+  protocolFeeBps: 200,
+  godWindow: GodWindowMode.OptIn,
+  entryWindowSeconds: 300,
+};
+
+/**
+ * High-stakes tournament config.
+ *
+ * Design rationale:
+ *   - Wider range (1-20) + tighter cap (2 per number) = 40 players max.
+ *   - Forces more strategic thinking (more numbers to consider).
+ *   - Higher min (6) so every round has meaningful action.
+ *   - Disabled God Window — secrets stay secret forever.
+ */
+export const TOURNAMENT_ROUND_CONFIG: RoundConfig = {
+  owner: '0x' + '0'.repeat(64),
+  stakeAmount: 10_000_000n, // 10 NIGHT
+  minPlayers: 6,
+  maxPlayers: 40,
+  maxGuessesPerNumber: 2,
   guessMin: 1,
   guessMax: 20,
-  stakeAmount: 100_000n, // 0.1 NIGHT
-  minPlayers: 2,
-  maxPlayers: 12,
-  entryWindowSeconds: 120,
-  protocolFeeBps: 0, // free-play for hackathon demo
-  godWindow: GodWindowMode.FullReveal,
+  protocolFeeBps: 300,
+  godWindow: GodWindowMode.Disabled,
+  entryWindowSeconds: 600,
 };
+
+/**
+ * Compute the theoretical maximum players a round can hold, given the
+ * anti-crowd cap. Useful for UI sanity-checks.
+ */
+export function theoreticalMaxPlayers(config: RoundConfig): number {
+  const range = config.guessMax - config.guessMin + 1;
+  return Math.min(config.maxPlayers, range * config.maxGuessesPerNumber);
+}

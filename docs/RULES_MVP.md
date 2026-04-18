@@ -1,127 +1,214 @@
-# BlindOracle — MVP Game Rules
+# BlindOracle — MVP Rules
 
-**Version**: 0.1.0 (Hackathon MVP)
+**TL;DR**: Pick a secret number. Guess what your random opponent's secret is. Oracle judges. Winner takes pot (minus 2% fee). Optional reveal afterward.
 
----
-
-## Overview
-
-BlindOracle is a round-based prediction game where players commit to a hidden secret number, submit a blind guess, and are randomly paired after the round closes. Winners are determined by whether their guess matches their opponent's secret.
-
-**Core principle**: Fairness without full visibility. Players trust the outcome because it is cryptographically provable, not because everything is publicly visible.
+For the detailed state machine and mechanics, see [`MECHANICS.md`](./MECHANICS.md).
+For the full ruleset in tabular form, see [`../blindoracle-api/src/config.ts`](../blindoracle-api/src/config.ts).
 
 ---
 
-## Round Structure
+## 1. Core Concepts
 
-Each round has four phases:
+Every player commits **two numbers**:
 
-### Phase 1 — Entry (Open)
+| Concept | Meaning | Privacy | Capacity |
+|---------|---------|---------|----------|
+| `answer` | The number OTHERS will try to guess. YOUR secret. | **Private** (hidden commitment) | Uncapped |
+| `guess` | What YOU think your opponent's answer is. Your prediction. | **Public** at commit | Capped |
 
-- A round opens with a defined **entry window** (e.g., 5 minutes or until N players join)
-- Each player connects their wallet and enters the round
-- Entry requires a **stake** (fixed amount per round, identical for all players)
-
-### Phase 2 — Commit (Secret + Guess)
-
-During the entry window, each player submits two values:
-
-1. **Secret Number**: A hidden value from **1 to 10** (inclusive)
-2. **Guess**: A prediction of what their future opponent's secret might be, from **1 to 10**
-
-Both values are committed on-chain as cryptographic commitments (hashes). The raw values are **never** publicly visible during this phase.
-
-- Players cannot see other players' secrets or guesses
-- Players cannot change their submission after committing
-- The commitment proves the value was chosen before matching
-
-### Phase 3 — Lock + Match
-
-Once the entry window closes:
-
-- **No more entries or changes** are accepted
-- The protocol **randomly pairs** players into 1-on-1 matches
-- If there is an odd number of players, the unpaired player receives a **refund** (no penalty)
-- Pairing is deterministic from the set of locked entries + an entropy source, making it auditable
-
-### Phase 4 — Settle + Prove
-
-For each pair:
-
-| Scenario | Outcome |
-|----------|---------|
-| Player A's guess == Player B's secret | **A wins the match** |
-| Player B's guess == Player A's secret | **B wins the match** |
-| Both guess correctly | **Split** — each receives their stake back |
-| Neither guesses correctly | **Draw** — each receives their stake back minus a small protocol fee |
-
-**Payout**: The winner receives both players' stakes minus the protocol fee.
-
-Each player receives a **proof of outcome** — a verifiable receipt showing the result without exposing all private data from the round.
+This distinction is the protocol's foundation. Read [`MECHANICS.md §1`](./MECHANICS.md#1-vocabulary--critical--do-not-conflate) if unclear.
 
 ---
 
-## God Window (Optional)
+## 2. Round Phases
 
-After settlement, the round host or protocol can enable the **God Window**:
+```
+ Forming → Open → Locked → Settling → Settled
+               ↓
+             Aborted (if not enough players)
+```
 
-- Reveals the actual secret numbers and guesses for all pairs
-- Creates a dramatic reveal moment
-- Useful for spectators, replays, and educational demos
-- **Disabled by default** — must be explicitly enabled per round or mode
-
-The God Window does **not** affect settlement. It is purely a post-settlement disclosure feature.
-
----
-
-## Parameters (MVP Defaults)
-
-| Parameter | Default |
-|-----------|---------|
-| Secret range | 1–10 |
-| Guess range | 1–10 |
-| Min players per round | 2 |
-| Max players per round | 20 |
-| Entry window | 5 minutes |
-| Stake per player | Fixed (TBD — configurable) |
-| Protocol fee | 2% of total pot |
-| God Window | Off (opt-in) |
+| Phase | What happens |
+|-------|-------------|
+| **Forming** | Entries accepted. Round hasn't formally started (below min players). |
+| **Open** | Minimum met, entry window counting down. Still accepting entries. |
+| **Locked** | No more entries. Matching begins. |
+| **Settling** | Pair-by-pair settlement. |
+| **Settled** | All payouts assigned. God Window opens. |
+| **Aborted** | Too few players. Refunds claimable. |
 
 ---
 
-## Anti-Cheat Properties
+## 3. The Entry Phase
 
-- **Non-malleable commitments**: Secrets and guesses are locked via `persistentCommit` before matching occurs
-- **Post-lock pairing**: No player knows their opponent when choosing their secret or guess
-- **Auditable randomness**: Pairing entropy is derived from committed data, making it deterministic and verifiable
-- **No information leakage**: The protocol reveals only the outcome, not the full private state (unless God Window is enabled)
-
----
-
-## Winning Strategy
-
-In the MVP, the optimal strategy depends on game theory:
-
-- **Pure luck**: If opponents choose uniformly random, all guesses are equally likely to succeed (10% hit rate per pair)
-- **Behavioral reads**: Over many rounds, patterns may emerge — but the MVP does not provide opponent history
-- **Risk tolerance**: Entering the round is the primary decision — the guess itself is low-information
-
-Future versions may add strategic depth through multi-round history, partial reveals, and advanced scoring.
+When you click "Enter Round":
+1. Your browser picks a 32-byte random salt.
+2. The UI computes `persistentHash(answer, salt)` — the hiding commitment.
+3. You submit `(player_pk, answer_commitment, guess)` to the contract via `enter_round`.
+4. The contract verifies:
+   - Round is Forming or Open
+   - You haven't entered yet
+   - Your guess is in range
+   - **Your guess bucket isn't full** ← anti-crowd cap
+   - Round isn't at max players
+5. The contract writes your entry and increments the bucket count.
+6. If your entry brings the player count to `minPlayers`, the round auto-transitions to Open.
 
 ---
 
-## Example Round
+## 4. The Anti-Crowd Cap
 
-1. **6 players** enter Round #1
-2. Each commits a secret number and a guess
-3. Entry window closes → all commitments lock
-4. Protocol pairs: A↔D, B↔F, C↔E
-5. Results:
-   - A guessed 7, D's secret was 7 → **A wins**
-   - D guessed 3, A's secret was 5 → **D loses**
-   - B guessed 4, F's secret was 9 → **B loses**
-   - F guessed 2, B's secret was 2 → **F wins**
-   - C guessed 6, E's secret was 6 → **C wins**
-   - E guessed 1, C's secret was 8 → **E loses**
-6. Payouts distributed, proof receipts issued
-7. God Window (if enabled): all secrets and guesses revealed for spectators
+> *"We never want to lock in the number the player chose for themselves — that would limit potential winners. But we DO want to prevent everyone from piling on the same guess."*
+> — John
+
+**How it works**: Each guess value has `maxGuessesPerNumber` slots. Once those are filled, that number is rejected for new entries.
+
+**Example** (range 1-10, cap 3):
+```
+  Guess:  1  2  3  4  5  6  7  8  9 10
+ Picked:  1  0  2  0  3  1  2  0  1  0
+                       ↑
+                   bucket 5 is full — no new entries on 5
+```
+
+Try to pick a full bucket → `Guess bucket full - pick a different number`. The UI grays out full numbers.
+
+**Why cap guesses but not answers?**
+- Capping answers would reduce the population of potential winners (fewer unique targets).
+- Capping guesses forces strategic diversity without sacrificing win-rate.
+- Secret info (answer) stays secret → game integrity.
+
+---
+
+## 5. The Minimum-Player Epoch Gate
+
+> *"An epoch in our game doesn't start until there are enough players. There may need to be a refund mechanism."*
+> — John
+
+**Before minPlayers reached** (Forming):
+- Entries accepted but round is "warming up"
+- Entry window has NOT started
+- Owner can call `abort_round` if confidence is low
+
+**When minPlayers reached**:
+- Round auto-transitions to Open
+- Entry window begins
+- More entries welcome up to `maxPlayers`
+
+**If entry window expires below minPlayers** (off-chain timer):
+- Owner calls `abort_round` → phase = Aborted
+- Every player calls `claim_refund` → gets full stake back, no fee
+- Owner calls `new_round` to reset
+
+This guarantees: **nobody ever loses money to a failed round**.
+
+---
+
+## 6. The Lock Phase
+
+When the entry window expires with enough players:
+- Owner calls `lock_round` → phase = Locked
+- No more entries accepted
+- Off-chain matching service computes pairs using deterministic randomness seeded from all commitments
+
+---
+
+## 7. The Matching Phase
+
+Matching uses a deterministic shuffle seeded from the set of locked commitments. Properties:
+- **Reproducible** by any verifier
+- **Unpredictable** until lock (nobody knew who their opponent would be)
+- **Unmanipulable** by any single player (all commitments feed the seed)
+
+For odd player counts, the last player after shuffle is unpaired and gets a full stake refund.
+
+**Note on randomness**: the MVP entropy source is commitment-derived, which is theoretically grindable. Production should use a Midnight block-hash beacon. See [`WHAT_YOURE_NOT_THINKING_ABOUT.md §Solution 1`](./WHAT_YOURE_NOT_THINKING_ABOUT.md#problem-1-randomness-grinding-attack).
+
+---
+
+## 8. The Settlement Phase
+
+For each matched pair `(A, B)`:
+
+```
+pot = 2 × stakeAmount
+fee = pot × protocolFeeBps / 10000
+
+if A guessed B's answer AND B guessed A's answer:
+  → Split: both get (pot - fee) / 2
+elif A guessed B's answer (only):
+  → A wins: A gets pot - fee, B gets 0
+elif B guessed A's answer (only):
+  → B wins: B gets pot - fee, A gets 0
+else:
+  → Draw: both get stakeAmount - fee/2
+```
+
+Owner calls `submit_match_result(a, b, payoutA, payoutB)` once per pair. First call transitions Locked → Settling.
+
+---
+
+## 9. The God Window
+
+After `settle_round`, if the God Window is enabled for this round:
+- Each player may call `reveal_for_god_window(pk, answer, salt)`.
+- The contract recomputes the commitment and verifies it matches.
+- If valid, the answer is written to `revealedAnswers` and becomes publicly visible.
+
+Four God Window modes (per-round config):
+
+| Mode | Behavior |
+|------|----------|
+| `Disabled` | No reveal. Answers stay secret forever. |
+| `OptIn` | Each player chooses whether to reveal. |
+| `FullReveal` | All players are socially expected to reveal (not contract-enforced). |
+| `Delayed` | Reveals happen automatically after a delay (sealed-envelope effect). |
+
+---
+
+## 10. Anti-Cheat Properties Summary
+
+- ✅ **Hiding**: commitments reveal nothing about answers
+- ✅ **Binding**: you cannot swap your answer after committing
+- ✅ **No double-entry**: one pk = one entry per round
+- ✅ **Range-bounded**: all answers and guesses must be in `[guessMin, guessMax]`
+- ✅ **Authorization**: `owner`-only circuits verify caller identity via pk derivation
+- ✅ **Idempotent refunds**: `claim_refund` cannot be called twice by the same player
+- ✅ **Auditable settlement**: every payout is on-chain and verifiable
+- ✅ **Anti-crowd enforcement**: guess bucket counts prevent pile-ups
+- ✅ **Min-player guarantee**: refunds preserved on under-filled rounds
+
+---
+
+## 11. MVP Parameters (Demo Config)
+
+See [`../blindoracle-api/src/config.ts`](../blindoracle-api/src/config.ts) for the authoritative values.
+
+```ts
+DEMO_ROUND_CONFIG = {
+  stakeAmount: 0,             // free-play (no gambling concerns)
+  minPlayers: 2,
+  maxPlayers: 30,
+  maxGuessesPerNumber: 3,
+  guessMin: 1,
+  guessMax: 10,
+  protocolFeeBps: 0,
+  godWindow: 'full-reveal',
+  entryWindowSeconds: 120,
+}
+```
+
+Max round capacity: `min(30, 10 * 3) = 30` players.
+
+---
+
+## 12. Winning Strategy (Such As It Is)
+
+For a 10-number MVP, each guess has ~10% baseline hit rate. Over many rounds:
+- **Pure-random play**: expected value ≈ -protocolFeeBps/10000 of your stake per round.
+- **Pattern play**: if some numbers become more common, either in answers or in guesses, you can attempt to counter-pick.
+- **Streak play**: correctly guessing 3 rounds in a row is 0.1% probability — small edge from statistical wins on streak-bonus modes (future).
+
+The game is **barely skill** in MVP form. That's both a feature (low barrier) and a compliance concern (see [`GAMBLING_COMPLIANCE.md`](./GAMBLING_COMPLIANCE.md)).
+
+Future versions will add skill elements: ranged guesses, multi-round tournaments, history-aware strategies.
