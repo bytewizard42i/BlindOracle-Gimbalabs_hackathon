@@ -144,6 +144,20 @@ Because the HTML children of the canvas **stay in the DOM** (they just also get 
 
 Rule: any cross-package code goes through `blindoracle-api`. The UI never imports contract internals directly — only the typed surface.
 
+### Sibling pattern
+
+The `oracle-canvas/` module is the reference scaffold for any DIDzMonolith
+project that wants HTML-in-Canvas + WASM 3D. proofOrBluff will lift this
+pattern into its shared UI layer (see
+`proofOrBluff/docs/DESIGN_DECISIONS_HTML_IN_CANVAS.md`) when its UI is
+built. If the two projects end up with material duplication, we promote
+the shared bits to a workspace package (e.g. `@pixypi/html-in-canvas-react`).
+
+Note: BlindOracle is a single-screen entry experience, so it does *not*
+use demoLand / realDeal — the canvas IS the experience. proofOrBluff is
+multi-screen with persistent character state and therefore follows its
+shared-UI / demoLand / realDeal protocol strictly.
+
 ---
 
 *Last updated: April 21, 2026*
