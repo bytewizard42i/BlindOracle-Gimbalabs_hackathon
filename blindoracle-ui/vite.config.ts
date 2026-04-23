@@ -6,6 +6,7 @@ export default defineConfig({
   server: {
     port: 5177,
     host: true,
+    forwardConsole: true,
   },
   preview: {
     port: 5177,
