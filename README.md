@@ -16,8 +16,8 @@ Built for the **Gimbalabs Hackathon 2026**.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge)](./LICENSE)
 [![Midnight](https://img.shields.io/badge/Midnight-Network-9d4edd?style=for-the-badge)](https://midnight.network)
-[![Compact](https://img.shields.io/badge/Compact-v0.30.0-ffd60a?style=for-the-badge)](https://docs.midnight.network)
-[![Status](https://img.shields.io/badge/status-scaffolded-ff6b6b?style=for-the-badge)]()
+[![Compact](https://img.shields.io/badge/Compact-language%200.21%2B-ffd60a?style=for-the-badge)](https://docs.midnight.network)
+[![Status](https://img.shields.io/badge/status-compiles%20clean-4ade80?style=for-the-badge)]()
 
 </div>
 

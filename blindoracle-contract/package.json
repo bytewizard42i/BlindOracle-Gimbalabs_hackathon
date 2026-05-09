@@ -18,7 +18,8 @@
     }
   },
   "scripts": {
-    "compact": "compactc compile compact/blind-oracle.compact --output src/managed",
+    "compact": "compactc compact/blind-oracle.compact src/managed/blind-oracle",
+    "compact:check": "compactc --skip-zk compact/blind-oracle.compact src/managed/blind-oracle",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist src/managed",
