@@ -75,8 +75,8 @@ Track every tweet so the final presentation submission has all 12 links ready.
 
 | Builder Week | Hackathon Week | Date Posted | Tweet Link | Summary |
 |---|---|---|---|---|
-| 1 | 3 (May 3 deadline) | 2026-04-30 | *fill in URL after locating* | Inaugural post — repo created, monorepo + workspace + Idris MCP integrated, ChatGPT-generated brand media, GoDaddy domain bought, skeleton + future-functionality docs written, MidnightVitals named as instrumentation. Newman replied positively (Apr 30). |
-| 2 | 4 (May 10 deadline) | 2026-05-10 *(planned)* | *fill in URL after posting* | v2 contract (answer/guess split, min-player gating, anti-crowd cap), v3 contract (3-pool architecture, 90/10 split, bot UX fiction), Oracle Canvas scaffold (HTML-in-Canvas + WASM 3D plugin shape), **contract compiles clean** (10 circuits → ZKIR via local compactc 0.29.0), Blockfrost dependency dropped (cleaner ZK story). Forward: Testnet-02 deploy + first bot-seeded playtest. |
+| 1 | 3 (May 3 deadline) | 2026-04-30 18:14 EDT | https://x.com/realjohnny5i/status/2049975668566356157 | Inaugural post. Repo created, monorepo workspace assembled, Idris MCP from Olanetsoft integrated for Ai guardrails on Compact code in Windsurf. ChatGPT used for brand media (carpet-first design metaphor). GoDaddy domains bought. Skeleton + future-functionality + assessment docs written. MidnightVitals named as planned instrumentation. Floated possible Blockfrost integration (later dropped, see Week 2). 164 views, Newman replied positively. |
+| 2 | 4 (May 10 deadline) | 2026-05-09 03:50 EDT | https://x.com/realjohnny5i/status/2053019204752757028 | Layman-accessible, humbly confident voice. Smart contract logic done (answer/guess split, human-min gate, anti-crowd cap). Three rooms in parallel with Ai players keeping rooms warm. UI scaffold up (3D scene, accessible from day one). **Contract compiles clean** (10 circuits to zero-knowledge proof code, biggest is 30KB enter_round). Honest pivot: Blockfrost removed, will use it on other projects later. |
 | 3 | 5 | | | |
 | 4 | 6 | | | |
 | 5 | 7 | | | |

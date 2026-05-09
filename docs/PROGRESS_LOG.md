@@ -6,6 +6,40 @@
 
 ## Week 2 — May 4-10, 2026 (post-enrollment)
 
+### 🐦 Tweet posted
+
+**Permalink:** https://x.com/realjohnny5i/status/2053019204752757028
+**Posted:** 2026-05-09 03:50 EDT (well ahead of the Sun May 10 12:00 UTC deadline)
+**Voice:** layman-accessible, humbly confident, no self-deprecation, no em-dashes
+
+Posted text (preserved here as the canonical record for the final presentation):
+
+> Hello everyone! Week 2 update on BlindOracle, my @gimbalabs hackathon project.
+>
+> Big week of progress, and I'm genuinely glad to share where it landed.
+>
+> https://github.com/bytewizard42i/BlindOracle-Gimbalabs_hackathon
+>
+> For the new folks: BlindOracle is a privacy-first guessing game on @MidnightNtwrk. You secretly hide a number AND secretly guess what number an arbitrarily assigned opponent will hide. Nobody, not the other player, not me, not even the chain, can see your move. But everyone can prove, cryptographically, that the game was fair.
+>
+> Update 2: This week, the foundation came together.
+>
+> 🃏 The smart contract logic is done. Players hide their answer AND their guess at the same time. The game won't start until enough humans have joined, and there's a built-in cap, so no one can game it by all picking the same number.
+>
+> 🎲 Three rooms in parallel. When you enter, you're invisibly assigned to one of three rooms; you don't know which. Your opponent always comes from your room, but you never learn the room boundary. Ai players keep each room warm until real humans show up, then quietly step aside as the game fills. Winners take 90% of the pot; the house keeps 10%.
+>
+> 🔮 The user interface scaffold is up. The entry experience is a custom 3D scene with a pluggable renderer, and it's accessible to screen readers and keyboard users from day one. (Most 3D-canvas UIs aren't, and that bothered me.)
+>
+> 🏗️ AND... I got the smart contract to compile cleanly today. All ten of the game's moves produce valid zero-knowledge-proof code. The biggest one (entering a round) generates 30KB of proof logic. The status badge on the GitHub repo just turned green.
+>
+> Honest update: last week I mentioned wanting to add blockfrost_io. After thinking it through, BlindOracle doesn't actually need it, Midnight already gives me everything I need. So I removed the dependency. Less is more. We will use the amazing Blockfrost API in a few of our other projects down the line.
+>
+> @gimbalabs @DraperDragon @midnightfdn @windsurf @OpenAI @newman5
+>
+> #gimbalabs #pieceofpie #hackathon
+
+**Attached screenshot:** terminal output showing the corrected `npm run compact:check` invocation, the silent successful compactc run, and the `ls -la src/managed/blind-oracle/zkir/` listing all 10 generated ZKIR files with their sizes plus the green "✅ All 10 circuits compiled to ZKIR. Exit code: 0" confirmation.
+
 ### Goal of this week
 Match my Week 1 narrative with code reality. Get the v3 contract from "scaffolded" to "compiles cleanly", set up reproducible compile tooling, and prepare for Testnet-02 deployment + first bot-seeded playtest.
 
@@ -122,20 +156,51 @@ README badge updated from red `scaffolded` to green `compiles clean`. Truthful a
 
 ## Week 1 — Apr 27 - May 3, 2026 (registration)
 
-> *Captured from the Apr 30, 2026 tweet at 6:14 PM (UTC-04). Newman S Lanier (Gimbalabs admin) replied positively, calling out the "design around the carpet" insight as a great example of a hackathon update.*
+### 🐦 Tweet posted
+
+**Permalink:** https://x.com/realjohnny5i/status/2049975668566356157
+**Posted:** 2026-04-30 18:14 EDT (3 days before the May 3 12:00 UTC enrollment deadline)
+**Reach:** 164 views, Newman S Lanier (Gimbalabs admin) replied positively
+
+Posted text (preserved verbatim as the canonical record for the final presentation):
+
+> Hello everyone! Welcome to the Johnny5i inaugural @gimbalabs hackathon weekly update.
+>
+> I will be doing one of these for each week of the entire hackathon as I compete to get my portion of a tasty pie, and the chance to pitch my broken-ass project to @DraperDragon !!!
+>
+> So follow along with me and monitor my progress as I crash and burn in real time like a drunken airshow pilot. It will be spectacular!
+>
+> https://github.com/bytewizard42i/BlindOracle-Gimbalabs_hackathon
+>
+> Update 1: This week I created the repo on GitHub, made a local clone that i added to a workspace with all my other midnight repositories and @olanetsoft MCP for midnight, which gives my Ai guardrails for making compact code on my IDE of @windsurf .
+>
+> As you can see from the picture, I used @OpenAI ChatGPT to make some media files. (It's like buying a carpet, then designing the room around it, gives you a north star I find making media).
+>
+> I purchased a few URLs from @GoDaddy (who always front-runs my name choices). Then I proceeded to explain clearly and concisely to my Ai the structure of what I wanted to build, and away we went.
+>
+> Then I started to create the skeleton, and some deep dive files for future functionality, what I might be forgetting, and assessment reports. Im super excited at how much this project will be able to showcase about Midnight's potential and I get to try out my invention called MidnightVitals, which pings the node and server and wallet for health details.
+>
+> Im also excited to see if I can integrate @blockfrost_io into this little gem.
+>
+> Wish me luck or utter failure! 🙂
+>
+> @MidnightNtwrk @midnightfdn
+>
+> #gimbalabs #pieceofpie #hackathon
+>
+> @gimbalabs
+
+> *Note: this Week 1 tweet pre-dates the new "humbly confident, no self-deprecation" tone rule John locked in May 9. Phrases like "broken-ass project", "crash and burn in real time like a drunken airshow pilot", and "Wish me luck or utter failure" are preserved verbatim as the historical record. Future tweets follow the new tone (see Week 2 for the calibrated version).*
 
 ### What shipped
 - Created `bytewizard42i/BlindOracle-Gimbalabs_hackathon` GitHub repo
 - Local clone added to workspace alongside other Midnight repos
-- Integrated [Olanetsoft's Midnight MCP](https://github.com/Olanetsoft/midnight-mcp) (now `Idris MCP`) — gives the AI guardrails when generating Compact code in Windsurf
+- Integrated [Olanetsoft's Midnight MCP](https://github.com/Olanetsoft/midnight-mcp) (now `Idris MCP`), gives Ai guardrails when generating Compact code in Windsurf
 - Used ChatGPT to generate brand media files (the "design around the carpet" north-star insight)
 - Bought GoDaddy domain(s) before name-cybersquatters could front-run
 - Wrote skeleton + deep-dive docs: `FUTURE_FUNCTIONALITY.md`, `WHAT_YOURE_NOT_THINKING_ABOUT.md`, etc.
 - Named MidnightVitals (an existing personal invention) as the planned instrumentation surface
-- Floated Blockfrost integration as a maybe (later dropped — see Week 2)
-
-### Tweet permalink
-*To be filled in once located on x.com/realjohnny5i — search "Johnny5i inaugural @gimbalabs hackathon weekly update" or check Apr 30 evening post.*
+- Floated Blockfrost integration as a maybe (later dropped, see Week 2)
 
 ---
 
