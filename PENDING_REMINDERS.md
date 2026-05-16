@@ -1,9 +1,9 @@
 # Pending Reminders — BlindOracle 🎀
 
-## 🐦 Gimbalabs X (Twitter) Post — Due before Sunday, May 17, 2026
+## 🐦 Gimbalabs X (Twitter) Post — Week 3 Update (COMPLETED)
 
-**Owner**: John (drafting), Penny (reminder + assist)  
-**Status**: ⏳ Pending as of May 14, 2026
+**Owner**: John (drafting), Penny (reminder + assist)
+**Status**: ✅ Completed — week 3 update posted May 16, 2026
 
 ### What it's for
 
