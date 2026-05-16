@@ -4,6 +4,74 @@
 
 ---
 
+## Week 5 — May 11-17, 2026 (toolchain + ecosystem)
+
+### 🐦 Tweet posted
+
+**Permalink:** _(pending — to be filled in after posting before Sun May 17 12:00 UTC)_
+**Voice:** humbly confident, layman-accessible, no self-deprecation, no em-dashes, "Ai" not "AI"
+
+### Goal of this week
+
+Take last week's "compiles cleanly on `compactc 0.29.0` (language 0.21)" win and bring it forward to the latest stable Midnight toolchain. Also do ecosystem-citizen work that strengthens BlindOracle and every other Midnight DApp downstream.
+
+### What shipped
+
+#### 🔨 Bumped to `compactc 0.31.0` (Apr 29, 2026 release) — May 16
+
+Pragma changed from `>= 0.16 && <= 0.21` to `>= 0.16 && <= 0.23`. Single-line edit to `blindoracle-contract/compact/blind-oracle.compact`.
+
+Local install path: GitHub-auth issue from Week 2 still blocks the `compact` updater (`Bad credentials`), so installed `compactc 0.31.0` directly from the GitHub release tarball into `~/.compact/versions/0.31.0/x86_64-unknown-linux-musl/`.
+
+**Compile result** — full ZK compile in **20.6 seconds**, exit code 0, zero warnings. All 10 circuits produce both `.zkir` (text) and `.bzkir` (binary) artifacts; `keys/` directory now contains 10 prover + 10 verifier keys (new in v0.31's artifact layout); `compiler/contract-info.json` reports authoritative version metadata:
+
+```json
+{
+  "compiler-version": "0.31.0",
+  "language-version": "0.23.0",
+  "runtime-version": "0.16.0"
+}
+```
+
+ZKIR sizes (byte-exact match with Week 2's `compactc 0.29.0` output for the unchanged contract — confirms no semantic regression from the language bump):
+
+| Circuit | ZKIR size |
+|---|---|
+| `enter_round` | 30,769 bytes (still the largest, as expected) |
+| `new_round` | 16,490 bytes |
+| `submit_match_result` | 16,434 bytes |
+| `submit_unpaired_refund` | 9,299 bytes |
+| `claim_refund` | 7,854 bytes |
+| `reveal_for_god_mode` | 6,571 bytes |
+| `lock_round` | 5,762 bytes |
+| `claim_house_fee` | 4,891 bytes |
+| `settle_round` | 4,060 bytes |
+| `abort_round` | 3,981 bytes |
+
+#### 🌐 Ecosystem-citizen work
+
+- **Filed [Olanetsoft/midnight-mcp#37](https://github.com/Olanetsoft/midnight-mcp/issues/37)** on May 9 (last week, but linked here for the audit trail) flagging that the Idris MCP's `midnight-get-latest-syntax` tool was 6 weeks behind the latest Compact release. Posted a friendly week-2 status nudge today (May 16) including additional asks (pragma bump, `JubjubPoint`/`convertBytesToUint` mistakes catalog, v0.30 quirks). Comment ID `4467570594`.
+- **Re-verified the full Midnight compatibility matrix** at https://docs.midnight.network/relnotes/support-matrix and cross-checked against the Idris MCP `midnight-get-version-info` tool. Both sources agree on the toolchain as of May 16. Updated the canonical `monolith-docs/midnight/COMPACT_VERSIONS.md` and `ECOSYSTEM_TIMELINE.md` (commit `3b9e074` on `bytewizard42i/DIDzMonolith`) with 10+ missing SDK rows (Compact JS, Platform JS, On-chain runtime, Midnight.js, testkit-js, DApp Connector API, Wallet SDK facade, Proof server, Ledger, Block explorer, Faucet) and per-network node/indexer versions.
+- **Synced sister-AI fleet rules** — bumped `SISTERS_GLOBAL_RULES.md` to v0.31.0 (language 0.23) so all five sister AI assistants (Cassie, Alice, Casie, Cara, Penny) start every Midnight session with current information.
+
+### Forward look — week ending May 24
+
+1. **Deploy v3 contract to Midnight Testnet-02** — `https://faucet.testnet-02.midnight.network`, first-time deploy path.
+2. **First bot-seeded playtest round.** Wire the UI's bot-fiction renderer to a 3-player real session.
+3. **MidnightVitals first instrumentation pass.** Node + server + wallet during the playtest.
+4. **Locate Sebastien Guillemot's WASM 3D artifact** OR ship a placeholder Three.js renderer that satisfies the loader interface.
+5. **Patch the `compact` updater GitHub-auth blocker** (refresh `GH_TOKEN` or fall back to scripted release downloads in package.json).
+
+### Risks / blockers
+
+| Risk | Status |
+|---|---|
+| Local `compact` updater still hits GitHub `Bad credentials` | Workaround in place (direct release tarball install). Future-proof fix needs `GH_TOKEN` refresh. |
+| MCP playground compile path still returns `INVALID_RESPONSE` | Issue #37 nudge posted today. Local `compactc 0.31.0` is the source of truth in the meantime. |
+| Idris MCP syntax data still pinned at 0.16-0.21 (`lastUpdated: 2026-03-24`) | Issue #37 still open, no upstream response. Doesn't block local work. |
+
+---
+
 ## Week 2 — May 4-10, 2026 (post-enrollment)
 
 ### 🐦 Tweet posted
